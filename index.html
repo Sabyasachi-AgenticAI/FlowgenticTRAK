@@ -1,0 +1,1349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Aria Demo Dashboard — Flowgentic × CSA</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:#080A0F;font-family:'Inter',sans-serif;color:#C9D1DC;overflow:hidden}
+::-webkit-scrollbar{width:3px}::-webkit-scrollbar-thumb{background:#1E2A3A;border-radius:2px}
+.app{display:grid;grid-template-rows:48px 1fr;height:100vh}
+.topbar{background:#0D1117;border-bottom:1px solid #1A2332;display:flex;align-items:center;padding:0 16px;gap:0;flex-shrink:0}
+.body{display:grid;grid-template-columns:270px 1fr;overflow:hidden}
+.logo{display:flex;align-items:center;gap:8px;padding-right:16px;border-right:1px solid #1A2332}
+.logo-chip{width:26px;height:26px;border-radius:6px;background:#2D1B69;display:flex;align-items:center;justify-content:center;font-size:13px}
+.logo-text{font-size:13px;font-weight:600;color:#E2E8F0}
+.logo-sub{font-size:11px;color:#3D5170;margin-left:4px}
+.tabs{display:flex;padding-left:8px}
+.tab{display:flex;align-items:center;gap:7px;padding:0 16px;height:48px;background:transparent;border:none;border-bottom:2px solid transparent;cursor:pointer;font-size:11px;color:#3D5170;transition:all .15s;font-family:'Inter',sans-serif}
+.tab.on{color:#E2E8F0;border-bottom-color:#7C3AED}
+.tab-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.gap{flex:1}
+.kpis{display:flex;gap:6px}
+.kpi{background:#0D1117;border:1px solid #1A2332;border-radius:5px;padding:5px 12px;text-align:center;min-width:64px}
+.kpi-n{font-size:16px;font-weight:600;color:#E2E8F0;line-height:1}
+.kpi-l{font-size:9px;color:#3D5170;margin-top:2px;letter-spacing:.8px}
+.ctrl{margin-left:14px;display:flex;align-items:center;gap:8px}
+
+/* ── call button states ── */
+.call-btn{background:#16A34A;color:#fff;border:none;border-radius:6px;padding:7px 18px;font-size:11px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:7px;font-family:'Inter',sans-serif;transition:all .15s;letter-spacing:.3px}
+.call-btn:hover{opacity:.85}
+.call-btn:disabled{opacity:.35;cursor:not-allowed}
+.call-btn.connecting{background:#92400E}
+.call-btn.active{background:#991B1B}
+.call-pill{display:flex;align-items:center;gap:6px;background:#052e16;border:1px solid #166534;border-radius:12px;padding:5px 14px;font-size:10px;color:#4ade80;font-weight:600}
+.rst-btn{background:#0D1117;border:1px solid #1A2332;border-radius:5px;padding:6px 12px;font-size:11px;cursor:pointer;color:#3D5170;font-family:'Inter',sans-serif}
+.rst-btn:hover{color:#8B98A8}
+.sb-badge{font-size:9px;border:1px solid #1A3820;border-radius:3px;padding:2px 7px;font-family:'JetBrains Mono',monospace;margin-left:8px}
+
+/* ── audio bars ── */
+.audio-bars{display:flex;align-items:flex-end;gap:2px;height:16px}
+.audio-bar{width:3px;background:#4ade80;border-radius:1px;animation:none}
+.audio-bar.active{animation:audioBar var(--dur,.4s) ease-in-out infinite alternate}
+@keyframes audioBar{from{height:3px}to{height:14px}}
+
+/* ── feed ── */
+.feed{background:#080A0F;border-right:1px solid #1A2332;display:flex;flex-direction:column;overflow:hidden}
+.feed-hdr{padding:10px 14px;border-bottom:1px solid #1A2332;font-size:9px;color:#3D5170;letter-spacing:2px;font-weight:600;flex-shrink:0}
+.feed-body{flex:1;overflow-y:auto;padding:10px}
+.fc{background:#0D1117;border:1px solid #1A2332;border-radius:8px;padding:10px 12px;margin-bottom:8px;animation:popIn .25s ease}
+.fc.live{border-color:#3D1F80;background:#0F0D1C}
+.fc-row1{display:flex;justify-content:space-between;margin-bottom:5px}
+.fc-title{font-size:11px;font-weight:500;color:#C9D1DC}
+.fc-time{font-size:10px;color:#3D5170;font-family:'JetBrains Mono',monospace}
+.fc-who{font-size:10px;color:#3D5170;margin-bottom:5px}
+.fc-q{font-size:10px;color:#5A6A7A;line-height:1.5;border-left:2px solid #1A2332;padding-left:8px;margin-bottom:7px;font-style:italic}
+.fc-foot{display:flex;justify-content:space-between;align-items:center}
+.fc-tool{font-size:9px;color:#34D399;background:#091810;border:1px solid #1A3820;border-radius:3px;padding:2px 6px;font-family:'JetBrains Mono',monospace}
+.fc-badge{font-size:9px;font-weight:600;padding:2px 7px;border-radius:3px;letter-spacing:.3px}
+.b-auto{background:#091810;color:#34D399}
+.b-live{background:#1A1040;color:#A78BFA}
+.b-esc{background:#2D1800;color:#F59E0B}
+
+/* ── data col ── */
+.dcol{display:flex;flex-direction:column;overflow:hidden}
+.dhdr{padding:10px 16px;border-bottom:1px solid #1A2332;display:flex;justify-content:space-between;align-items:center;flex-shrink:0}
+.dtitle{font-size:12px;font-weight:600;color:#C9D1DC}
+.dsub{font-size:10px;color:#3D5170;margin-top:1px}
+.dbadges{display:flex;gap:6px}
+.db{font-size:9px;font-weight:600;padding:3px 8px;border-radius:3px;letter-spacing:.4px}
+.db-b{background:#0A1830;color:#60A5FA;border:1px solid #1A3060}
+.db-g{background:#091810;color:#34D399;border:1px solid #1A3820}
+.dbody{flex:1;overflow-y:auto}
+table{width:100%;border-collapse:collapse;font-size:11px}
+thead tr{background:#0D1117;border-bottom:1px solid #1A2332}
+th{padding:7px 12px;text-align:left;font-size:9px;font-weight:600;color:#3D5170;letter-spacing:.8px;white-space:nowrap}
+tbody tr{border-bottom:1px solid #0D1117;transition:background .2s}
+tbody tr:hover{background:#0D1117}
+td{padding:9px 12px;color:#6B7A8D;white-space:nowrap}
+.t-ref{font-weight:600;color:#60A5FA;font-family:'JetBrains Mono',monospace;font-size:11px}
+.t-ref.g{color:#34D399}
+.t-str{color:#C9D1DC;font-weight:500}
+.t-mono{font-family:'JetBrains Mono',monospace;font-size:10px}
+.row-new{background:#091810 !important;animation:flash .8s ease}
+.pill{display:inline-flex;align-items:center;gap:4px;font-size:9px;font-weight:600;padding:2px 7px;border-radius:3px}
+.p-act{background:#0A1830;color:#60A5FA}
+.p-new{background:#091810;color:#34D399}
+.p-don{background:#151515;color:#3D5170}
+.aria-lbl{color:#A78BFA;font-weight:600;font-size:10px}
+.bar-foot{padding:9px 16px;border-top:1px solid #1A2332;display:flex;align-items:center;gap:8px;flex-shrink:0}
+.bar-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.bar-msg{font-size:11px;font-weight:500}
+.pls{animation:pulse 1.2s ease-in-out infinite}
+
+/* ── transcript bubbles ── */
+.tx{border-radius:8px;padding:8px 12px;margin-bottom:8px;animation:popIn .2s ease;border:1px solid}
+.tx.tx-aria{background:#0F0D1C;border-color:#3D1F80}
+.tx.tx-user{background:#080D18;border-color:#1A3060}
+.tx-who{font-size:9px;font-weight:600;letter-spacing:.8px;margin-bottom:4px}
+.tx-aria .tx-who{color:#A78BFA}
+.tx-user .tx-who{color:#60A5FA}
+.tx-text{font-size:11px;color:#C9D1DC;line-height:1.5;font-style:italic}
+.tx-cursor{display:inline-block;width:6px;height:11px;background:#A78BFA;border-radius:1px;margin-left:3px;animation:pulse .8s ease-in-out infinite;vertical-align:middle}
+.tx-user .tx-cursor{background:#60A5FA}
+.tx.tx-done .tx-cursor{display:none}
+
+@keyframes popIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+@keyframes flash{0%,100%{background:#091810}50%{background:#0d3320}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- TOP BAR -->
+<div class="topbar">
+  <div class="logo">
+    <div class="logo-chip">⚡</div>
+    <span class="logo-text">Aria</span>
+    <span class="logo-sub">by Flowgentic</span>
+  </div>
+  <div class="tabs">
+    <button class="tab" id="t1" onclick="switchTab('lt')">
+      <span class="tab-dot" style="background:#60A5FA"></span>Load Tender
+    </button>
+    <button class="tab on" id="t2" onclick="switchTab('cc')">
+      <span class="tab-dot" style="background:#F59E0B"></span>Outbound Carrier Check
+    </button>
+    <button class="tab" id="t3" onclick="switchTab('ar')">
+      <span class="tab-dot" style="background:#34D399"></span>AR Collections
+    </button>
+  </div>
+  <div class="gap"></div>
+  <div class="kpis" id="kpis-lt" style="display:none">
+    <div class="kpi"><div class="kpi-n" id="k1">12</div><div class="kpi-l">CALLS TODAY</div></div>
+    <div class="kpi"><div class="kpi-n" style="color:#34D399" id="k2">91%</div><div class="kpi-l">CONTAINED</div></div>
+    <div class="kpi"><div class="kpi-n" id="k3">9</div><div class="kpi-l">ACTIONS</div></div>
+  </div>
+  <div class="kpis" id="kpis-cc">
+    <div class="kpi"><div class="kpi-n" id="cc-k1">0</div><div class="kpi-l">CALLS MADE</div></div>
+    <div class="kpi"><div class="kpi-n" style="color:#34D399" id="cc-k2">0</div><div class="kpi-l">CONFIRMED</div></div>
+    <div class="kpi"><div class="kpi-n" style="color:#F59E0B" id="cc-k3">0</div><div class="kpi-l">PENDING</div></div>
+  </div>
+  <div class="kpis" id="kpis-ar" style="display:none">
+    <div class="kpi"><div class="kpi-n" id="ar-k1">0</div><div class="kpi-l">CALLS MADE</div></div>
+    <div class="kpi"><div class="kpi-n" style="color:#60A5FA" id="ar-k2">$0</div><div class="kpi-l">PROMISED</div></div>
+    <div class="kpi"><div class="kpi-n" style="color:#34D399" id="ar-k3">$0</div><div class="kpi-l">COLLECTED</div></div>
+  </div>
+  <span class="sb-badge" id="sb-status" style="color:#3D5170">● CONNECTING</span>
+  <div class="ctrl" id="ctrl">
+    <button class="call-btn" id="call-btn" onclick="activeToggleCall()">
+      <span id="call-icon">📞</span>
+      <span id="call-label">Call Aria</span>
+    </button>
+    <button class="rst-btn" id="reset-btn" onclick="activeResetDemo()" style="display:none">Reset</button>
+  </div>
+</div>
+
+<!-- BODY: Load Tender -->
+<div class="body" id="lt-body" style="display:none">
+  <div class="feed">
+    <div class="feed-hdr">ACTIVITY FEED</div>
+    <div class="feed-body" id="feed"></div>
+  </div>
+  <div class="dcol" id="dcol">
+    <div style="display:flex;align-items:center;justify-content:center;height:100%;color:#3D5170;font-size:12px">
+      Connecting to Supabase…
+    </div>
+  </div>
+</div>
+
+<!-- BODY: Outbound Carrier Check -->
+<div class="body" id="cc-body">
+  <div class="feed">
+    <div class="feed-hdr">CARRIER CHECK FEED</div>
+    <div class="feed-body" id="cc-feed"></div>
+  </div>
+  <div class="dcol" id="cc-dcol">
+    <div style="display:flex;align-items:center;justify-content:center;height:100%;color:#3D5170;font-size:12px">
+      Loading carrier data…
+    </div>
+  </div>
+</div>
+
+<!-- BODY: AR Collections -->
+<div class="body" id="ar-body" style="display:none">
+  <div class="feed">
+    <div class="feed-hdr">AR COLLECTIONS FEED</div>
+    <div class="feed-body" id="ar-feed"></div>
+  </div>
+  <div class="dcol" id="ar-dcol">
+    <div style="display:flex;align-items:center;justify-content:center;height:100%;color:#3D5170;font-size:12px">
+      Loading AR data…
+    </div>
+  </div>
+</div>
+</div>
+
+<script>
+// ── Config ───────────────────────────────────────────────────
+const SUPA_URL    = 'https://xfhegmlpfqqbipzngjcu.supabase.co';
+const SUPA_ANON   = 'sb_publishable_I7CK8LBaIZpspmO2cX43PQ_fX9MzZVI';
+const LK_API_KEY    = 'APITdSxhr7LFtFv';
+const LK_API_SECRET = 'plYaMr0rbwVMwUkGFf3wOSq7E9faHFF7vEfW1SpCobVA';
+const LK_WS_URL     = 'wss://flow-crew-wlm418hq.livekit.cloud';
+
+// Room name is unique per session — LiveKit agent auto-dispatches to any room
+function newRoomName() {
+  return 'crew-' + Math.random().toString(36).slice(2, 9);
+}
+
+const { createClient } = supabase;
+const db = createClient(SUPA_URL, SUPA_ANON);
+
+// ── State ────────────────────────────────────────────────────
+let loads      = [];
+let hasNewLoad = false;
+let lkRoom     = null;
+let callState  = 'idle'; // idle | connecting | active
+const activeTranscripts = new Map(); // segmentId → DOM element
+
+// ── Render loads table ───────────────────────────────────────
+function renderLoads() {
+  const newCount = loads.filter(l => l.status === 'new').length;
+  document.getElementById('dcol').innerHTML =
+    `<div class="dhdr">
+      <div>
+        <div class="dtitle">Dispatch-Trak — Active Loads</div>
+        <div class="dsub">Saturn Freight Systems · All Modes</div>
+      </div>
+      <div class="dbadges">
+        <span class="db db-b">${loads.length} LOADS</span>
+        ${newCount ? `<span class="db db-g">${newCount} NEW</span>` : ''}
+      </div>
+    </div>
+    <div class="dbody">
+      <table>
+        <thead><tr>
+          <th>REF #</th><th>SHIPPER</th><th>ROUTE</th><th>SERVICE</th>
+          <th>WEIGHT</th><th>STATUS</th><th>CARRIER</th><th>ETA</th><th>CREATED BY</th>
+        </tr></thead>
+        <tbody>
+          ${loads.map(l => `
+            <tr class="${l.status==='new'?'row-new':''}">
+              <td class="t-ref ${l.status==='new'?'g':''}">${l.ref}</td>
+              <td class="t-str" style="max-width:130px;overflow:hidden;text-overflow:ellipsis">${l.shipper}</td>
+              <td class="t-mono t-str">${l.route}</td>
+              <td>${l.service}</td>
+              <td>${l.weight}</td>
+              <td>${statusPill(l.status)}</td>
+              <td>${l.carrier}</td>
+              <td class="t-mono">${l.eta}</td>
+              <td>${l.created_by==='aria'
+                ? '<span class="aria-lbl">⚡ Aria AI</span>'
+                : `<span style="color:#3D5170">${l.created_by}</span>`}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    ${hasNewLoad ? `
+      <div class="bar-foot">
+        <span class="bar-dot pls" style="background:#34D399"></span>
+        <span class="bar-msg" style="color:#34D399">New load created by Aria — dashboard updated live</span>
+      </div>` : ''}`;
+}
+
+function statusPill(st) {
+  if (st === 'new') return '<span class="pill p-new">NEW ✦</span>';
+  if (st === 'act') return '<span class="pill p-act">Active</span>';
+  return '<span class="pill p-don">Delivered</span>';
+}
+
+// ── Render feed card ─────────────────────────────────────────
+function renderFeedCard(row, prepend) {
+  const f   = document.getElementById('feed');
+  const who = row.who === 'aria' ? 'Aria AI · Saturn Freight'
+            : row.who === 'cal'  ? 'Caller · Saturn Freight'
+            : 'System · Saturn Freight';
+  const d   = document.createElement('div');
+  d.className = 'fc' + (row.who === 'aria' ? ' live' : '');
+  d.innerHTML =
+    `<div class="fc-row1">
+      <span class="fc-title">${row.title}</span>
+      <span class="fc-time">${row.time_str}</span>
+    </div>
+    <div class="fc-who">${who}</div>
+    <div class="fc-q">"${row.quote.substring(0,90)}${row.quote.length>90?'…':''}"</div>
+    <div class="fc-foot">
+      ${row.tool ? `<span class="fc-tool">${row.tool}</span>` : '<span></span>'}
+      <span class="fc-badge b-${row.badge_type}">${
+        row.badge_type==='auto' ? 'Automated' :
+        row.badge_type==='esc'  ? 'Escalated' : 'Live'}</span>
+    </div>`;
+  if (prepend) f.insertBefore(d, f.firstChild);
+  else f.appendChild(d);
+}
+
+// ── Load initial data ─────────────────────────────────────────
+async function loadData() {
+  const [lr, fr] = await Promise.all([
+    db.from('demo_loads').select('*').order('created_at', {ascending: true}),
+    db.from('demo_feed').select('*').order('created_at', {ascending: false})
+  ]);
+  if (lr.error || fr.error) { console.error(lr.error || fr.error); return; }
+  loads      = lr.data;
+  hasNewLoad = loads.some(l => l.status === 'new');
+  renderLoads();
+  document.getElementById('feed').innerHTML = '';
+  fr.data.forEach(r => renderFeedCard(r, false));
+}
+
+// ── Supabase Realtime ─────────────────────────────────────────
+function subscribeRealtime() {
+  db.channel('demo-loads')
+    .on('postgres_changes', {event:'INSERT', schema:'public', table:'demo_loads'}, p => {
+      loads.unshift(p.new);
+      hasNewLoad = true;
+      renderLoads();
+      document.getElementById('k1').textContent =
+        parseInt(document.getElementById('k1').textContent) + 1;
+      document.getElementById('k3').textContent =
+        parseInt(document.getElementById('k3').textContent) + 1;
+    })
+    .on('postgres_changes', {event:'DELETE', schema:'public', table:'demo_loads'}, p => {
+      loads = loads.filter(l => l.ref !== p.old.ref);
+      hasNewLoad = loads.some(l => l.status === 'new');
+      renderLoads();
+    })
+    .subscribe(status => {
+      const badge = document.getElementById('sb-status');
+      if (status === 'SUBSCRIBED') {
+        badge.textContent  = '● LIVE';
+        badge.style.color  = '#34D399';
+        badge.style.borderColor = '#1A3820';
+      }
+    });
+
+  db.channel('demo-feed')
+    .on('postgres_changes', {event:'INSERT', schema:'public', table:'demo_feed'}, p => {
+      renderFeedCard(p.new, true);
+    })
+    .on('postgres_changes', {event:'DELETE', schema:'public', table:'demo_feed'}, () => {
+      loadData();
+    })
+    .subscribe();
+}
+
+// ── Transcription ─────────────────────────────────────────────
+// Used by both text-stream path (primary) and TranscriptionReceived fallback
+function updateTranscriptEl(segId, text, isAgent, isFinal) {
+  if (!text || !text.trim()) return;
+  const cls   = isAgent ? 'tx-aria' : 'tx-user';
+  const label = isAgent ? '⚡ ARIA' : '👤 YOU';
+
+  let el = activeTranscripts.get(segId);
+  if (!el) {
+    el = document.createElement('div');
+    el.className = `tx ${cls}`;
+    el.innerHTML =
+      `<div class="tx-who">${label}</div>` +
+      `<span class="tx-text"></span>` +
+      `<span class="tx-cursor"></span>`;
+    const feed = document.getElementById('feed');
+    feed.insertBefore(el, feed.firstChild);
+    activeTranscripts.set(segId, el);
+  }
+
+  el.querySelector('.tx-text').textContent = text;
+  if (isFinal) {
+    el.classList.add('tx-done');
+    activeTranscripts.delete(segId);
+  }
+}
+
+// ── LiveKit call ─────────────────────────────────────────────
+async function toggleCall() {
+  if (callState === 'idle')   { await startCall(); return; }
+  if (callState === 'active') { await endCall();   return; }
+}
+
+// ── JWT helpers ──────────────────────────────────────────────
+function b64url(str) {
+  return btoa(unescape(encodeURIComponent(str)))
+    .replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+}
+function b64urlBuf(buf) {
+  const b = new Uint8Array(buf);
+  let s = '';
+  for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
+  return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+}
+async function signJWT(payload) {
+  const hdr = b64url(JSON.stringify({alg:'HS256',typ:'JWT'}));
+  const pay = b64url(JSON.stringify(payload));
+  const inp = `${hdr}.${pay}`;
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw', enc.encode(LK_API_SECRET), {name:'HMAC',hash:'SHA-256'}, false, ['sign']
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(inp));
+  return `${inp}.${b64urlBuf(sig)}`;
+}
+
+// Participant token — joins the room
+async function makeParticipantToken(room) {
+  const now = Math.floor(Date.now() / 1000);
+  return signJWT({
+    iss: LK_API_KEY, exp: now + 3600, nbf: now,
+    jti: `user-${Date.now()}`,
+    video: { room, roomJoin: true, canPublish: true, canSubscribe: true, canPublishData: true },
+    name: 'CSA Demo Viewer', metadata: ''
+  });
+}
+
+// Admin token scoped to a specific room for agent dispatch
+async function makeAdminToken(room) {
+  const now = Math.floor(Date.now() / 1000);
+  return signJWT({
+    iss: LK_API_KEY, exp: now + 300, nbf: now,
+    video: { room, roomCreate: true, roomAdmin: true }
+  });
+}
+
+// Explicitly dispatch my-agent to the room via LiveKit AgentDispatch API
+async function dispatchAgent(room) {
+  try {
+    const adminToken = await makeAdminToken(room);
+    const lkHttpUrl  = LK_WS_URL.replace('wss://', 'https://');
+    const res = await fetch(
+      `${lkHttpUrl}/twirp/livekit.AgentDispatchService/CreateDispatch`,
+      {
+        method:  'POST',
+        headers: { 'Authorization': 'Bearer ' + adminToken, 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ room, agentName: 'my-agent' })
+      }
+    );
+    const text = await res.text();
+    if (!res.ok) { dbg('Dispatch API error ' + res.status + ': ' + text); return; }
+    dbg('Step 4c ✓ Dispatch OK — my-agent inbound');
+  } catch (e) {
+    dbg('Dispatch fetch failed: ' + e.message);
+  }
+}
+
+async function startCall() {
+  setCallState('connecting');
+  showError('');
+  dbg('Starting call…');
+  try {
+    // Step 1 — SDK check
+    dbg('Step 1: Checking LiveKit SDK…');
+    if (typeof LivekitClient === 'undefined') throw new Error('LiveKit SDK not loaded. Check network.');
+    dbg('Step 1 ✓ SDK loaded (v' + (LivekitClient.version||'?') + ')');
+
+    // Step 2 — Token
+    dbg('Step 2: Generating token…');
+    const room  = newRoomName();
+    const token = await makeParticipantToken(room);
+    dbg('Step 2 ✓ Token ready · room: ' + room);
+
+    // Step 3 — Room object
+    dbg('Step 3: Creating room object…');
+    lkRoom = new LivekitClient.Room({ adaptiveStream: true, dynacast: true });
+
+    lkRoom.on(LivekitClient.RoomEvent.Disconnected, () => {
+      dbg('Disconnected.');
+      setCallState('idle');
+    });
+
+    // Play audio from every remote participant (the agent)
+    lkRoom.on(LivekitClient.RoomEvent.TrackSubscribed, (track, _pub, participant) => {
+      dbg('Track from ' + participant.identity + ' (' + track.kind + ')');
+      if (track.kind === LivekitClient.Track.Kind.Audio) {
+        const el = track.attach();
+        el.dataset.lkParticipant = participant.sid;
+        document.body.appendChild(el);
+        dbg('Agent audio attached — you should hear Aria');
+      }
+    });
+
+    lkRoom.on(LivekitClient.RoomEvent.TrackUnsubscribed, (track) => {
+      track.detach().forEach(el => el.remove());
+    });
+
+    // Animate bars when anyone (agent) is speaking
+    lkRoom.on(LivekitClient.RoomEvent.ActiveSpeakersChanged, spk => {
+      const agentSpeaking = spk.some(p => p !== lkRoom.localParticipant);
+      updateAudioBars(agentSpeaking);
+    });
+
+    lkRoom.on(LivekitClient.RoomEvent.ParticipantConnected, p => {
+      dbg('Participant joined: ' + p.identity);
+    });
+
+    dbg('Step 3 ✓ Room object created');
+
+    // Step 4 — Connect
+    dbg('Step 4: Connecting to ' + LK_WS_URL + '…');
+    await lkRoom.connect(LK_WS_URL, token);
+    dbg('Step 4 ✓ Connected — room: ' + room);
+
+    // Step 4b — Log ALL room events to debug what the agent is sending
+    const _origEmit = lkRoom.emit.bind(lkRoom);
+    lkRoom.emit = function(event, ...args) {
+      if (!['activeSpeakersChanged','audioPlaybackStatusChanged'].includes(event)) {
+        dbg('EVENT: ' + event + (args[0] ? ' [' + (typeof args[0]) + ']' : ''));
+      }
+      return _origEmit(event, ...args);
+    };
+
+    dbg('Step 4b ✓ Event spy registered (text streams are primary path)');
+
+    // Text stream handler (newer SDK path — primary for LiveKit Agent Builder)
+    if (typeof lkRoom.registerTextStreamHandler === 'function') {
+      lkRoom.registerTextStreamHandler('lk.transcription', async (reader, participantInfo) => {
+        const attrs   = (reader.info && reader.info.attributes) ? reader.info.attributes : {};
+        const segId   = attrs['lk.segment_id'];
+        const isFinal = attrs['lk.transcription_final'] !== 'false'; // missing = treat as final
+        const isAgent = participantInfo.identity !== lkRoom.localParticipant.identity;
+        dbg('TX from=' + participantInfo.identity + ' segId=' + segId + ' final=' + isFinal + ' attrs=' + JSON.stringify(attrs));
+
+        // If no stable segment_id, skip interim to avoid duplicate bubbles
+        if (!segId && !isFinal) { dbg('TX skipping interim (no segId)'); return; }
+
+        const stableId = segId || ('ts-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6));
+        try {
+          const text = await reader.readAll();
+          updateTranscriptEl(stableId, text, isAgent, isFinal);
+        } catch(e) { dbg('TextStream error: ' + e.message); }
+      });
+
+      lkRoom.registerTextStreamHandler('lk.chat', async (reader, participantInfo) => {
+        const isAgent = participantInfo.identity !== lkRoom.localParticipant.identity;
+        const segId   = 'chat-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+        dbg('TextStream lk.chat from=' + participantInfo.identity);
+        try {
+          const text = await reader.readAll();
+          updateTranscriptEl(segId, text, isAgent, true);
+        } catch(e) { dbg('TextStream error: ' + e.message); }
+      });
+
+      dbg('Step 4b+ ✓ Text stream handlers registered (lk.transcription + lk.chat)');
+    }
+
+    dbg('Step 4c: Dispatching my-agent…');
+    await dispatchAgent(room);
+
+    // Step 5 — Unlock audio (must be in user-gesture context)
+    dbg('Step 5: Unlocking browser audio…');
+    await lkRoom.startAudio();
+    dbg('Step 5 ✓ Audio unlocked');
+
+    // Step 6 — Mic
+    dbg('Step 6: Enabling microphone…');
+    await lkRoom.localParticipant.setMicrophoneEnabled(true);
+    dbg('Step 6 ✓ Microphone live — dispatching my-agent…');
+
+    setCallState('active');
+    dbg('Call live — speak to Aria');
+  } catch (err) {
+    console.error('[LiveKit]', err);
+    dbg('✗ ERROR: ' + (err.message || err));
+    setCallState('idle');
+    showError(err.message || 'Connection failed — see debug panel');
+  }
+}
+
+function dbg(msg) {
+  console.log('[LiveKit]', msg);
+  let panel = document.getElementById('dbg-panel');
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = 'dbg-panel';
+    panel.style.cssText = [
+      'position:fixed','bottom:16px','right:16px','width:360px',
+      'background:#0D1117','border:1px solid #1A2332','border-radius:8px',
+      'padding:10px 12px','font-family:JetBrains Mono,monospace','font-size:10px',
+      'color:#8B98A8','z-index:9999','max-height:200px','overflow-y:auto'
+    ].join(';');
+    panel.innerHTML = '<div style="color:#3D5170;font-size:9px;letter-spacing:1px;margin-bottom:6px">CALL DEBUG</div>';
+    document.body.appendChild(panel);
+  }
+  const row = document.createElement('div');
+  row.style.cssText = 'padding:2px 0;border-top:1px solid #1A2332';
+  row.textContent = msg;
+  if (msg.includes('✓')) row.style.color = '#34D399';
+  if (msg.includes('✗') || msg.includes('ERROR')) row.style.color = '#F87171';
+  panel.appendChild(row);
+  panel.scrollTop = panel.scrollHeight;
+}
+
+function showError(msg) {
+  let el = document.getElementById('call-error');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'call-error';
+    el.style.cssText = 'position:fixed;bottom:16px;right:16px;background:#2A0D0D;color:#F87171;border:1px solid #4A1A1A;border-radius:6px;padding:10px 14px;font-size:11px;max-width:320px;z-index:999;display:none';
+    document.body.appendChild(el);
+  }
+  if (msg) { el.textContent = '⚠ ' + msg; el.style.display = 'block'; }
+  else      { el.style.display = 'none'; }
+}
+
+async function endCall() {
+  if (lkRoom) {
+    await lkRoom.disconnect();
+    lkRoom = null;
+  }
+  document.querySelectorAll('audio[data-lk-participant]').forEach(el => el.remove());
+  activeTranscripts.forEach(el => el.classList.add('tx-done'));
+  activeTranscripts.clear();
+  setCallState('idle');
+}
+
+function setCallState(state) {
+  callState = state;
+  const btn   = document.getElementById('call-btn');
+  const icon  = document.getElementById('call-icon');
+  const label = document.getElementById('call-label');
+  const rst   = document.getElementById('reset-btn');
+
+  if (state === 'idle') {
+    btn.className      = 'call-btn';
+    btn.disabled       = false;
+    icon.textContent   = '📞';
+    label.textContent  = 'Call Aria';
+    rst.style.display  = hasNewLoad ? 'block' : 'none';
+    updateAudioBars(false);
+  } else if (state === 'connecting') {
+    btn.className      = 'call-btn connecting';
+    btn.disabled       = true;
+    icon.textContent   = '⏳';
+    label.textContent  = 'Connecting…';
+    rst.style.display  = 'none';
+  } else if (state === 'active') {
+    btn.className      = 'call-btn active';
+    btn.disabled       = false;
+    icon.innerHTML     = `<div class="audio-bars" id="audio-bars">
+      ${[.35,.55,.7,.45,.6].map((d,i) =>
+        `<div class="audio-bar" style="--dur:${d}s;height:3px" id="ab${i}"></div>`
+      ).join('')}
+    </div>`;
+    label.textContent  = 'End Call';
+    rst.style.display  = 'none';
+  }
+}
+
+function updateAudioBars(active) {
+  document.querySelectorAll('.audio-bar').forEach(b => {
+    b.classList.toggle('active', active);
+  });
+}
+
+// ── Reset demo ────────────────────────────────────────────────
+async function resetDemo() {
+  await Promise.all([
+    db.from('demo_loads').delete().eq('is_demo_row', true),
+    db.from('demo_feed').delete().eq('is_demo_row', true)
+  ]);
+  hasNewLoad = false;
+  document.getElementById('reset-btn').style.display = 'none';
+  await loadData();
+}
+
+// ── Tab switching ─────────────────────────────────────────────
+let activeTab = 'cc';
+
+function switchTab(tab) {
+  activeTab = tab;
+  document.getElementById('t1').className = 'tab' + (tab === 'lt' ? ' on' : '');
+  document.getElementById('t2').className = 'tab' + (tab === 'cc' ? ' on' : '');
+  document.getElementById('t3').className = 'tab' + (tab === 'ar' ? ' on' : '');
+  document.getElementById('lt-body').style.display  = tab === 'lt' ? 'grid' : 'none';
+  document.getElementById('cc-body').style.display  = tab === 'cc' ? 'grid' : 'none';
+  document.getElementById('ar-body').style.display  = tab === 'ar' ? 'grid' : 'none';
+  document.getElementById('kpis-lt').style.display  = tab === 'lt' ? 'flex' : 'none';
+  document.getElementById('kpis-cc').style.display  = tab === 'cc' ? 'flex' : 'none';
+  document.getElementById('kpis-ar').style.display  = tab === 'ar' ? 'flex' : 'none';
+  if (tab === 'lt') setCallState(callState);
+  else if (tab === 'cc') setCCCallState(ccCallState);
+  else              setARCallState(arCallState);
+}
+
+function activeToggleCall() {
+  if (activeTab === 'lt') toggleCall();
+  else if (activeTab === 'cc') ccToggleCall();
+  else arToggleCall();
+}
+function activeResetDemo() {
+  if (activeTab === 'lt') resetDemo();
+  else if (activeTab === 'cc') resetCCDemo();
+  else resetARDemo();
+}
+
+// ══════════════════════════════════════════════════════════════
+// OUTBOUND CARRIER CHECK — completely separate LiveKit + Supabase
+// ══════════════════════════════════════════════════════════════
+
+// ── CC Config (placeholders — fill in when LiveKit project is ready) ──
+const CC_LK_API_KEY    = 'PLACEHOLDER_CC_API_KEY';
+const CC_LK_API_SECRET = 'PLACEHOLDER_CC_API_SECRET';
+const CC_LK_WS_URL     = 'wss://PLACEHOLDER.livekit.cloud';
+const CC_AGENT_NAME    = 'PLACEHOLDER_CC_AGENT';
+
+// ── CC State ──────────────────────────────────────────────────
+let ccLoads          = [];
+let ccHasCallMade    = false;
+let ccLkRoom         = null;
+let ccCallState      = 'idle';
+const ccActiveTranscripts = new Map();
+
+// ── CC Render: loads table ────────────────────────────────────
+function renderCCLoads() {
+  const confirmed = ccLoads.filter(l => l.status === 'confirmed').length;
+  const pending   = ccLoads.filter(l => l.status === 'pending_check').length;
+  document.getElementById('cc-k2').textContent = confirmed;
+  document.getElementById('cc-k3').textContent = pending;
+
+  document.getElementById('cc-dcol').innerHTML =
+    `<div class="dhdr">
+      <div>
+        <div class="dtitle">Dispatch-Trak — Carrier Checks</div>
+        <div class="dsub">Outbound Call Queue · Saturn Freight Systems</div>
+      </div>
+      <div class="dbadges">
+        <span class="db db-b">${ccLoads.length} LOADS</span>
+        ${confirmed ? `<span class="db db-g">${confirmed} CONFIRMED</span>` : ''}
+      </div>
+    </div>
+    <div class="dbody">
+      <table>
+        <thead><tr>
+          <th>REF #</th><th>CARRIER</th><th>ROUTE</th><th>PICKUP</th>
+          <th>PALLETS</th><th>CALL STATUS</th><th>ETA CONFIRMED</th><th>OUTCOME</th>
+        </tr></thead>
+        <tbody>
+          ${ccLoads.map(l => `
+            <tr class="${l.status==='confirmed'?'row-new':''}">
+              <td class="t-ref ${l.status==='confirmed'?'g':''}">${l.ref}</td>
+              <td class="t-str">${l.carrier}</td>
+              <td class="t-mono">${l.route || (l.origin + ' → ' + l.destination)}</td>
+              <td>${l.pickup_time}</td>
+              <td style="text-align:center">${l.pallets}</td>
+              <td>${ccCallStatusPill(l.call_status)}</td>
+              <td class="t-mono">${l.eta_confirmed || '—'}</td>
+              <td>${ccOutcomePill(l.status)}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    ${ccHasCallMade ? `
+      <div class="bar-foot">
+        <span class="bar-dot pls" style="background:#F59E0B"></span>
+        <span class="bar-msg" style="color:#F59E0B">Carrier check completed by Aria — status updated live</span>
+      </div>` : ''}`;
+}
+
+function ccCallStatusPill(st) {
+  if (st === 'in_progress') return '<span class="pill p-act">In Progress</span>';
+  if (st === 'completed')   return '<span class="pill p-don">Completed</span>';
+  return '<span class="pill" style="background:#131313;color:#3D5170">Not Called</span>';
+}
+function ccOutcomePill(st) {
+  if (st === 'confirmed')    return '<span class="pill p-new">Confirmed ✦</span>';
+  if (st === 'issue_raised') return '<span class="pill" style="background:#2D1800;color:#F59E0B">Issue Raised</span>';
+  if (st === 'rescheduled')  return '<span class="pill" style="background:#0A1830;color:#60A5FA">Rescheduled</span>';
+  return '<span class="pill" style="background:#131313;color:#3D5170">Pending</span>';
+}
+
+// ── CC Render: feed card ──────────────────────────────────────
+function renderCCFeedCard(row, prepend) {
+  const f   = document.getElementById('cc-feed');
+  const who = row.who === 'aria'    ? 'Aria AI · Saturn Freight'
+            : row.who === 'carrier' ? 'Carrier · Inbound'
+            : 'System · Saturn Freight';
+  const d   = document.createElement('div');
+  d.className = 'fc' + (row.who === 'aria' ? ' live' : '');
+  d.innerHTML =
+    `<div class="fc-row1">
+      <span class="fc-title">${row.title}</span>
+      <span class="fc-time">${row.time_str}</span>
+    </div>
+    <div class="fc-who">${who}</div>
+    <div class="fc-q">"${row.quote.substring(0,90)}${row.quote.length>90?'…':''}"</div>
+    <div class="fc-foot">
+      ${row.tool ? `<span class="fc-tool">${row.tool}</span>` : '<span></span>'}
+      <span class="fc-badge b-${row.badge_type}">${
+        row.badge_type==='auto' ? 'Automated' :
+        row.badge_type==='esc'  ? 'Escalated' : 'Live'}</span>
+    </div>`;
+  if (prepend) f.insertBefore(d, f.firstChild);
+  else         f.appendChild(d);
+}
+
+// ── CC Transcript bubbles ─────────────────────────────────────
+function ccUpdateTranscriptEl(segId, text, isAgent, isFinal) {
+  if (!text || !text.trim()) return;
+  const cls   = isAgent ? 'tx-aria' : 'tx-user';
+  const label = isAgent ? '⚡ ARIA' : '👤 YOU';
+
+  let el = ccActiveTranscripts.get(segId);
+  if (!el) {
+    el = document.createElement('div');
+    el.className = `tx ${cls}`;
+    el.innerHTML =
+      `<div class="tx-who">${label}</div>` +
+      `<span class="tx-text"></span>` +
+      `<span class="tx-cursor"></span>`;
+    const feed = document.getElementById('cc-feed');
+    feed.insertBefore(el, feed.firstChild);
+    ccActiveTranscripts.set(segId, el);
+  }
+  el.querySelector('.tx-text').textContent = text;
+  if (isFinal) {
+    el.classList.add('tx-done');
+    ccActiveTranscripts.delete(segId);
+  }
+}
+
+// ── CC Load initial data ──────────────────────────────────────
+async function loadCCData() {
+  const [lr, fr] = await Promise.all([
+    db.from('carrier_check_loads').select('*').order('created_at', {ascending: true}),
+    db.from('carrier_check_feed').select('*').order('created_at', {ascending: false})
+  ]);
+  if (lr.error || fr.error) { console.error(lr.error || fr.error); return; }
+  ccLoads      = lr.data;
+  ccHasCallMade = ccLoads.some(l => l.call_status === 'completed');
+  document.getElementById('cc-k1').textContent = ccLoads.filter(l => l.call_status === 'completed').length;
+  renderCCLoads();
+  document.getElementById('cc-feed').innerHTML = '';
+  fr.data.forEach(r => renderCCFeedCard(r, false));
+}
+
+// ── CC Supabase Realtime ──────────────────────────────────────
+function subscribeCCRealtime() {
+  db.channel('cc-loads')
+    .on('postgres_changes', {event:'*', schema:'public', table:'carrier_check_loads'}, p => {
+      if (p.eventType === 'INSERT') {
+        ccLoads.push(p.new);
+      } else if (p.eventType === 'UPDATE') {
+        const idx = ccLoads.findIndex(l => l.id === p.new.id);
+        if (idx > -1) ccLoads[idx] = p.new;
+      } else if (p.eventType === 'DELETE') {
+        ccLoads = ccLoads.filter(l => l.id !== p.old.id);
+      }
+      ccHasCallMade = ccLoads.some(l => l.call_status === 'completed');
+      renderCCLoads();
+      document.getElementById('cc-k1').textContent =
+        ccLoads.filter(l => l.call_status === 'completed').length;
+    })
+    .subscribe();
+
+  db.channel('cc-calls')
+    .on('postgres_changes', {event:'INSERT', schema:'public', table:'carrier_check_calls'}, () => {
+      document.getElementById('cc-k1').textContent =
+        parseInt(document.getElementById('cc-k1').textContent) + 1;
+    })
+    .subscribe();
+
+  db.channel('cc-feed')
+    .on('postgres_changes', {event:'INSERT', schema:'public', table:'carrier_check_feed'}, p => {
+      renderCCFeedCard(p.new, true);
+    })
+    .on('postgres_changes', {event:'DELETE', schema:'public', table:'carrier_check_feed'}, () => {
+      loadCCData();
+    })
+    .subscribe();
+}
+
+// ── CC LiveKit JWT helpers ────────────────────────────────────
+async function ccSignJWT(payload) {
+  const hdr = b64url(JSON.stringify({alg:'HS256',typ:'JWT'}));
+  const pay = b64url(JSON.stringify(payload));
+  const inp = `${hdr}.${pay}`;
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw', enc.encode(CC_LK_API_SECRET), {name:'HMAC',hash:'SHA-256'}, false, ['sign']
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(inp));
+  return `${inp}.${b64urlBuf(sig)}`;
+}
+async function ccMakeParticipantToken(room) {
+  const now = Math.floor(Date.now() / 1000);
+  return ccSignJWT({
+    iss: CC_LK_API_KEY, exp: now + 3600, nbf: now,
+    jti: `cc-user-${Date.now()}`,
+    video: { room, roomJoin: true, canPublish: true, canSubscribe: true, canPublishData: true },
+    name: 'CSA Demo Viewer', metadata: ''
+  });
+}
+async function ccMakeAdminToken(room) {
+  const now = Math.floor(Date.now() / 1000);
+  return ccSignJWT({
+    iss: CC_LK_API_KEY, exp: now + 300, nbf: now,
+    video: { room, roomCreate: true, roomAdmin: true }
+  });
+}
+async function ccDispatchAgent(room) {
+  try {
+    const adminToken = await ccMakeAdminToken(room);
+    const httpUrl    = CC_LK_WS_URL.replace('wss://', 'https://');
+    const res = await fetch(
+      `${httpUrl}/twirp/livekit.AgentDispatchService/CreateDispatch`,
+      {
+        method:  'POST',
+        headers: { 'Authorization': 'Bearer ' + adminToken, 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ room, agentName: CC_AGENT_NAME })
+      }
+    );
+    const text = await res.text();
+    if (!res.ok) { dbg('[CC] Dispatch error ' + res.status + ': ' + text); return; }
+    dbg('[CC] Dispatch OK — ' + CC_AGENT_NAME + ' inbound');
+  } catch (e) { dbg('[CC] Dispatch failed: ' + e.message); }
+}
+
+// ── CC Call functions ─────────────────────────────────────────
+function ccToggleCall() {
+  if (ccCallState === 'idle')   { ccStartCall(); return; }
+  if (ccCallState === 'active') { ccEndCall();   return; }
+}
+
+async function ccStartCall() {
+  setCCCallState('connecting');
+  showError('');
+  dbg('[CC] Starting call…');
+  try {
+    if (typeof LivekitClient === 'undefined') throw new Error('LiveKit SDK not loaded.');
+    const room  = 'cc-' + Math.random().toString(36).slice(2, 9);
+    const token = await ccMakeParticipantToken(room);
+    dbg('[CC] Token ready · room: ' + room);
+
+    ccLkRoom = new LivekitClient.Room({ adaptiveStream: true, dynacast: true });
+
+    ccLkRoom.on(LivekitClient.RoomEvent.Disconnected, () => {
+      dbg('[CC] Disconnected.');
+      setCCCallState('idle');
+    });
+    ccLkRoom.on(LivekitClient.RoomEvent.TrackSubscribed, (track, _pub, participant) => {
+      if (track.kind === LivekitClient.Track.Kind.Audio) {
+        const el = track.attach();
+        el.dataset.lkParticipant = 'cc-' + participant.sid;
+        document.body.appendChild(el);
+        dbg('[CC] Agent audio attached');
+      }
+    });
+    ccLkRoom.on(LivekitClient.RoomEvent.TrackUnsubscribed, (track) => {
+      track.detach().forEach(el => el.remove());
+    });
+    ccLkRoom.on(LivekitClient.RoomEvent.ActiveSpeakersChanged, spk => {
+      if (activeTab === 'cc')
+        updateAudioBars(spk.some(p => p !== ccLkRoom.localParticipant));
+    });
+    ccLkRoom.on(LivekitClient.RoomEvent.ParticipantConnected, p => {
+      dbg('[CC] Participant joined: ' + p.identity);
+    });
+
+    await ccLkRoom.connect(CC_LK_WS_URL, token);
+    dbg('[CC] Connected');
+
+    if (typeof ccLkRoom.registerTextStreamHandler === 'function') {
+      ccLkRoom.registerTextStreamHandler('lk.transcription', async (reader, participantInfo) => {
+        const attrs   = (reader.info && reader.info.attributes) ? reader.info.attributes : {};
+        const segId   = attrs['lk.segment_id'];
+        const isFinal = attrs['lk.transcription_final'] !== 'false';
+        const isAgent = participantInfo.identity !== ccLkRoom.localParticipant.identity;
+        if (!segId && !isFinal) return;
+        const stableId = segId || ('cc-ts-' + Date.now());
+        try {
+          const text = await reader.readAll();
+          ccUpdateTranscriptEl(stableId, text, isAgent, isFinal);
+        } catch(e) { dbg('[CC] TextStream error: ' + e.message); }
+      });
+      ccLkRoom.registerTextStreamHandler('lk.chat', async (reader, participantInfo) => {
+        const isAgent = participantInfo.identity !== ccLkRoom.localParticipant.identity;
+        try {
+          const text = await reader.readAll();
+          ccUpdateTranscriptEl('chat-' + Date.now(), text, isAgent, true);
+        } catch(e) {}
+      });
+    }
+
+    await ccDispatchAgent(room);
+    await ccLkRoom.startAudio();
+    await ccLkRoom.localParticipant.setMicrophoneEnabled(true);
+    setCCCallState('active');
+    dbg('[CC] Call live');
+  } catch (err) {
+    console.error('[CC LiveKit]', err);
+    dbg('[CC] ✗ ERROR: ' + (err.message || err));
+    setCCCallState('idle');
+    showError(err.message || 'CC connection failed');
+  }
+}
+
+async function ccEndCall() {
+  if (ccLkRoom) {
+    await ccLkRoom.disconnect();
+    ccLkRoom = null;
+  }
+  document.querySelectorAll('audio[data-lk-participant^="cc-"]').forEach(el => el.remove());
+  ccActiveTranscripts.forEach(el => el.classList.add('tx-done'));
+  ccActiveTranscripts.clear();
+  setCCCallState('idle');
+}
+
+function setCCCallState(state) {
+  ccCallState = state;
+  if (activeTab !== 'cc') return; // don't touch the button if CC tab isn't visible
+  const btn   = document.getElementById('call-btn');
+  const icon  = document.getElementById('call-icon');
+  const label = document.getElementById('call-label');
+  const rst   = document.getElementById('reset-btn');
+  if (state === 'idle') {
+    btn.className     = 'call-btn';
+    btn.disabled      = false;
+    icon.textContent  = '📞';
+    label.textContent = 'Call Aria';
+    rst.style.display = ccHasCallMade ? 'block' : 'none';
+    updateAudioBars(false);
+  } else if (state === 'connecting') {
+    btn.className     = 'call-btn connecting';
+    btn.disabled      = true;
+    icon.textContent  = '⏳';
+    label.textContent = 'Connecting…';
+    rst.style.display = 'none';
+  } else if (state === 'active') {
+    btn.className    = 'call-btn active';
+    btn.disabled     = false;
+    icon.innerHTML   = `<div class="audio-bars" id="audio-bars">
+      ${[.35,.55,.7,.45,.6].map((d,i) =>
+        `<div class="audio-bar" style="--dur:${d}s;height:3px" id="ab${i}"></div>`
+      ).join('')}
+    </div>`;
+    label.textContent = 'End Call';
+    rst.style.display = 'none';
+  }
+}
+
+// ── CC Reset ──────────────────────────────────────────────────
+async function resetCCDemo() {
+  await Promise.all([
+    db.from('carrier_check_loads').update({status:'pending_check', call_status:'not_called', eta_confirmed:null}).eq('is_demo_row', true),
+    db.from('carrier_check_calls').delete().eq('is_demo_row', true),
+    db.from('carrier_check_feed').delete().eq('is_demo_row', true)
+  ]);
+  ccHasCallMade = false;
+  document.getElementById('reset-btn').style.display = 'none';
+  await loadCCData();
+}
+
+// ══════════════════════════════════════════════════════════════
+// AR COLLECTIONS — separate LiveKit project (placeholders)
+// ══════════════════════════════════════════════════════════════
+
+const AR_LK_API_KEY    = 'PLACEHOLDER_AR_API_KEY';
+const AR_LK_API_SECRET = 'PLACEHOLDER_AR_API_SECRET';
+const AR_LK_WS_URL     = 'wss://PLACEHOLDER.livekit.cloud';
+const AR_AGENT_NAME    = 'PLACEHOLDER_AR_AGENT';
+
+let arAccounts       = [];
+let arHasCallMade    = false;
+let arLkRoom         = null;
+let arCallState      = 'idle';
+const arActiveTranscripts = new Map();
+
+function fmtDollars(n) {
+  if (!n) return '$0';
+  return '$' + Number(n).toLocaleString('en-US', {maximumFractionDigits: 0});
+}
+
+function renderARAccounts() {
+  const promised  = arAccounts.filter(a => a.status === 'payment_promised');
+  const collected = arAccounts.filter(a => a.status === 'paid');
+  const pending   = arAccounts.filter(a => a.status === 'pending_call').length;
+
+  const promisedAmt  = promised.reduce((s, a)  => s + Number(a.amount_due || 0), 0);
+  const collectedAmt = collected.reduce((s, a) => s + Number(a.amount_due || 0), 0);
+
+  document.getElementById('ar-k2').textContent = fmtDollars(promisedAmt);
+  document.getElementById('ar-k3').textContent = fmtDollars(collectedAmt);
+
+  document.getElementById('ar-dcol').innerHTML =
+    `<div class="dhdr">
+      <div>
+        <div class="dtitle">Account-Trak — AR Collections</div>
+        <div class="dsub">Overdue Accounts · Saturn Freight Systems</div>
+      </div>
+      <div class="dbadges">
+        <span class="db db-b">${arAccounts.length} ACCOUNTS</span>
+        ${pending ? `<span class="db" style="background:#1A1A0A;color:#F59E0B;border:1px solid #3D2800">${pending} PENDING</span>` : ''}
+      </div>
+    </div>
+    <div class="dbody">
+      <table>
+        <thead><tr>
+          <th>INVOICE #</th><th>CUSTOMER</th><th>AMOUNT DUE</th><th>DAYS OVERDUE</th>
+          <th>CALL STATUS</th><th>OUTCOME</th><th>PAYMENT DATE</th><th>NOTES</th>
+        </tr></thead>
+        <tbody>
+          ${arAccounts.map(a => `
+            <tr class="${a.status==='payment_promised'||a.status==='paid'?'row-new':''}">
+              <td class="t-ref ${a.status==='paid'?'g':''}">${a.invoice_no}</td>
+              <td class="t-str">${a.customer}</td>
+              <td class="t-mono t-str">$${Number(a.amount_due).toLocaleString()}</td>
+              <td style="color:${a.days_overdue>60?'#F87171':a.days_overdue>30?'#F59E0B':'#6B7A8D'}">${a.days_overdue}d</td>
+              <td>${arCallStatusPill(a.call_status)}</td>
+              <td>${arOutcomePill(a.status)}</td>
+              <td class="t-mono">${a.payment_date || '-'}</td>
+              <td style="font-size:10px;color:#5A6A7A;max-width:160px;overflow:hidden;text-overflow:ellipsis">${a.notes || ''}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    ${arHasCallMade ? `
+      <div class="bar-foot">
+        <span class="bar-dot pls" style="background:#34D399"></span>
+        <span class="bar-msg" style="color:#34D399">Payment secured by Aria — account updated live</span>
+      </div>` : ''}`;
+}
+
+function arCallStatusPill(st) {
+  if (st === 'in_progress') return '<span class="pill p-act">In Progress</span>';
+  if (st === 'completed')   return '<span class="pill p-don">Completed</span>';
+  return '<span class="pill" style="background:#131313;color:#3D5170">Not Called</span>';
+}
+function arOutcomePill(st) {
+  if (st === 'paid')             return '<span class="pill p-new">Collected ✦</span>';
+  if (st === 'payment_promised') return '<span class="pill p-act">Promised</span>';
+  if (st === 'escalated')        return '<span class="pill" style="background:#2D1800;color:#F59E0B">Escalated</span>';
+  return '<span class="pill" style="background:#131313;color:#3D5170">Pending</span>';
+}
+
+function renderARFeedCard(row, prepend) {
+  const f   = document.getElementById('ar-feed');
+  const who = row.who === 'aria'     ? 'Aria AI · Saturn Freight'
+            : row.who === 'customer' ? 'Customer · Inbound'
+            : 'System · Saturn Freight';
+  const d   = document.createElement('div');
+  d.className = 'fc' + (row.who === 'aria' ? ' live' : '');
+  d.innerHTML =
+    `<div class="fc-row1">
+      <span class="fc-title">${row.title}</span>
+      <span class="fc-time">${row.time_str}</span>
+    </div>
+    <div class="fc-who">${who}</div>
+    <div class="fc-q">"${row.quote.substring(0,90)}${row.quote.length>90?'...':''}"</div>
+    <div class="fc-foot">
+      ${row.tool ? `<span class="fc-tool">${row.tool}</span>` : '<span></span>'}
+      <span class="fc-badge b-${row.badge_type}">${
+        row.badge_type==='auto' ? 'Automated' :
+        row.badge_type==='esc'  ? 'Escalated' : 'Live'}</span>
+    </div>`;
+  if (prepend) f.insertBefore(d, f.firstChild);
+  else         f.appendChild(d);
+}
+
+function arUpdateTranscriptEl(segId, text, isAgent, isFinal) {
+  if (!text || !text.trim()) return;
+  const cls   = isAgent ? 'tx-aria' : 'tx-user';
+  const label = isAgent ? 'ARIA' : 'YOU';
+  let el = arActiveTranscripts.get(segId);
+  if (!el) {
+    el = document.createElement('div');
+    el.className = `tx ${cls}`;
+    el.innerHTML = `<div class="tx-who">${label}</div><span class="tx-text"></span><span class="tx-cursor"></span>`;
+    const feed = document.getElementById('ar-feed');
+    feed.insertBefore(el, feed.firstChild);
+    arActiveTranscripts.set(segId, el);
+  }
+  el.querySelector('.tx-text').textContent = text;
+  if (isFinal) { el.classList.add('tx-done'); arActiveTranscripts.delete(segId); }
+}
+
+async function loadARData() {
+  const [ar, fr] = await Promise.all([
+    db.from('ar_accounts').select('*').order('days_overdue', {ascending: false}),
+    db.from('ar_feed').select('*').order('created_at', {ascending: false})
+  ]);
+  if (ar.error || fr.error) { console.error(ar.error || fr.error); return; }
+  arAccounts    = ar.data;
+  arHasCallMade = arAccounts.some(a => a.call_status === 'completed');
+  document.getElementById('ar-k1').textContent = arAccounts.filter(a => a.call_status === 'completed').length;
+  renderARAccounts();
+  document.getElementById('ar-feed').innerHTML = '';
+  fr.data.forEach(r => renderARFeedCard(r, false));
+}
+
+function subscribeARRealtime() {
+  db.channel('ar-accounts')
+    .on('postgres_changes', {event:'*', schema:'public', table:'ar_accounts'}, p => {
+      if (p.eventType === 'UPDATE') {
+        const idx = arAccounts.findIndex(a => a.id === p.new.id);
+        if (idx > -1) arAccounts[idx] = p.new;
+      } else if (p.eventType === 'INSERT') {
+        arAccounts.push(p.new);
+      } else if (p.eventType === 'DELETE') {
+        arAccounts = arAccounts.filter(a => a.id !== p.old.id);
+      }
+      arHasCallMade = arAccounts.some(a => a.call_status === 'completed');
+      document.getElementById('ar-k1').textContent = arAccounts.filter(a => a.call_status === 'completed').length;
+      renderARAccounts();
+    })
+    .subscribe();
+
+  db.channel('ar-feed')
+    .on('postgres_changes', {event:'INSERT', schema:'public', table:'ar_feed'}, p => {
+      renderARFeedCard(p.new, true);
+    })
+    .on('postgres_changes', {event:'DELETE', schema:'public', table:'ar_feed'}, () => {
+      loadARData();
+    })
+    .subscribe();
+}
+
+async function arSignJWT(payload) {
+  const hdr = b64url(JSON.stringify({alg:'HS256',typ:'JWT'}));
+  const pay = b64url(JSON.stringify(payload));
+  const inp = `${hdr}.${pay}`;
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey('raw', enc.encode(AR_LK_API_SECRET), {name:'HMAC',hash:'SHA-256'}, false, ['sign']);
+  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(inp));
+  return `${inp}.${b64urlBuf(sig)}`;
+}
+async function arMakeParticipantToken(room) {
+  const now = Math.floor(Date.now() / 1000);
+  return arSignJWT({ iss: AR_LK_API_KEY, exp: now+3600, nbf: now, jti: `ar-user-${Date.now()}`,
+    video: {room, roomJoin:true, canPublish:true, canSubscribe:true, canPublishData:true}, name:'CSA Demo Viewer', metadata:'' });
+}
+async function arMakeAdminToken(room) {
+  const now = Math.floor(Date.now() / 1000);
+  return arSignJWT({ iss: AR_LK_API_KEY, exp: now+300, nbf: now, video: {room, roomCreate:true, roomAdmin:true} });
+}
+async function arDispatchAgent(room) {
+  try {
+    const adminToken = await arMakeAdminToken(room);
+    const httpUrl    = AR_LK_WS_URL.replace('wss://', 'https://');
+    const res = await fetch(`${httpUrl}/twirp/livekit.AgentDispatchService/CreateDispatch`,
+      { method:'POST', headers:{'Authorization':'Bearer '+adminToken,'Content-Type':'application/json'},
+        body: JSON.stringify({room, agentName: AR_AGENT_NAME}) });
+    const text = await res.text();
+    if (!res.ok) { dbg('[AR] Dispatch error '+res.status+': '+text); return; }
+    dbg('[AR] Dispatch OK');
+  } catch(e) { dbg('[AR] Dispatch failed: '+e.message); }
+}
+
+function arToggleCall() {
+  if (arCallState === 'idle')   { arStartCall(); return; }
+  if (arCallState === 'active') { arEndCall();   return; }
+}
+
+async function arStartCall() {
+  setARCallState('connecting');
+  showError('');
+  try {
+    if (typeof LivekitClient === 'undefined') throw new Error('LiveKit SDK not loaded.');
+    const room  = 'ar-' + Math.random().toString(36).slice(2, 9);
+    const token = await arMakeParticipantToken(room);
+    arLkRoom = new LivekitClient.Room({ adaptiveStream: true, dynacast: true });
+    arLkRoom.on(LivekitClient.RoomEvent.Disconnected, () => { setARCallState('idle'); });
+    arLkRoom.on(LivekitClient.RoomEvent.TrackSubscribed, (track, _pub, participant) => {
+      if (track.kind === LivekitClient.Track.Kind.Audio) {
+        const el = track.attach();
+        el.dataset.lkParticipant = 'ar-' + participant.sid;
+        document.body.appendChild(el);
+      }
+    });
+    arLkRoom.on(LivekitClient.RoomEvent.TrackUnsubscribed, track => { track.detach().forEach(el => el.remove()); });
+    arLkRoom.on(LivekitClient.RoomEvent.ActiveSpeakersChanged, spk => {
+      if (activeTab === 'ar') updateAudioBars(spk.some(p => p !== arLkRoom.localParticipant));
+    });
+    await arLkRoom.connect(AR_LK_WS_URL, token);
+    if (typeof arLkRoom.registerTextStreamHandler === 'function') {
+      arLkRoom.registerTextStreamHandler('lk.transcription', async (reader, participantInfo) => {
+        const attrs   = (reader.info && reader.info.attributes) ? reader.info.attributes : {};
+        const segId   = attrs['lk.segment_id'];
+        const isFinal = attrs['lk.transcription_final'] !== 'false';
+        const isAgent = participantInfo.identity !== arLkRoom.localParticipant.identity;
+        if (!segId && !isFinal) return;
+        const stableId = segId || ('ar-ts-' + Date.now());
+        try { const text = await reader.readAll(); arUpdateTranscriptEl(stableId, text, isAgent, isFinal); } catch(e) {}
+      });
+    }
+    await arDispatchAgent(room);
+    await arLkRoom.startAudio();
+    await arLkRoom.localParticipant.setMicrophoneEnabled(true);
+    setARCallState('active');
+  } catch(err) {
+    dbg('[AR] ERROR: ' + (err.message || err));
+    setARCallState('idle');
+    showError(err.message || 'AR connection failed');
+  }
+}
+
+async function arEndCall() {
+  if (arLkRoom) { await arLkRoom.disconnect(); arLkRoom = null; }
+  document.querySelectorAll('audio[data-lk-participant^="ar-"]').forEach(el => el.remove());
+  arActiveTranscripts.forEach(el => el.classList.add('tx-done'));
+  arActiveTranscripts.clear();
+  setARCallState('idle');
+}
+
+function setARCallState(state) {
+  arCallState = state;
+  if (activeTab !== 'ar') return;
+  const btn   = document.getElementById('call-btn');
+  const icon  = document.getElementById('call-icon');
+  const label = document.getElementById('call-label');
+  const rst   = document.getElementById('reset-btn');
+  if (state === 'idle') {
+    btn.className     = 'call-btn'; btn.disabled = false;
+    icon.textContent  = '📞'; label.textContent = 'Call Aria';
+    rst.style.display = arHasCallMade ? 'block' : 'none';
+    updateAudioBars(false);
+  } else if (state === 'connecting') {
+    btn.className     = 'call-btn connecting'; btn.disabled = true;
+    icon.textContent  = '⏳'; label.textContent = 'Connecting...';
+    rst.style.display = 'none';
+  } else if (state === 'active') {
+    btn.className    = 'call-btn active'; btn.disabled = false;
+    icon.innerHTML   = `<div class="audio-bars" id="audio-bars">${[.35,.55,.7,.45,.6].map((d,i) =>
+      `<div class="audio-bar" style="--dur:${d}s;height:3px" id="ab${i}"></div>`).join('')}</div>`;
+    label.textContent = 'End Call'; rst.style.display = 'none';
+  }
+}
+
+async function resetARDemo() {
+  await Promise.all([
+    db.from('ar_accounts').update({status:'pending_call', call_status:'not_called', payment_date:null}).eq('is_demo_row', true),
+    db.from('ar_feed').delete().eq('is_demo_row', true)
+  ]);
+  arHasCallMade = false;
+  document.getElementById('reset-btn').style.display = 'none';
+  await loadARData();
+}
+
+// ── Init ──────────────────────────────────────────────────────
+loadData();
+subscribeRealtime();
+loadCCData();
+subscribeCCRealtime();
+loadARData();
+subscribeARRealtime();
+</script>
+</body>
+</html>
