@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Flowgentic TRAK — Voice AI for World-Trak</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,500;0,600;0,700;0,800;0,900&display=swap" rel="stylesheet"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden;font-family:'Geist','Helvetica Neue',sans-serif}
+
+/* ══════════════════════════════════════
+   SLIDESHOW BACKGROUND
+══════════════════════════════════════ */
+.bg-slideshow{
+  position:fixed;inset:0;z-index:0;
+}
+.bg-slide{
+  position:absolute;inset:0;
+  background-size:cover;
+  background-position:center;
+  opacity:0;
+  transition:opacity 1.8s ease-in-out;
+  transform:scale(1.04);
+  animation:slowZoom 10s ease-in-out infinite alternate;
+}
+.bg-slide.active{opacity:1}
+
+/* subtle ken burns zoom per slide */
+.bg-slide:nth-child(1){animation-delay:0s}
+.bg-slide:nth-child(2){animation-delay:0.5s}
+.bg-slide:nth-child(3){animation-delay:1s}
+.bg-slide:nth-child(4){animation-delay:1.5s}
+.bg-slide:nth-child(5){animation-delay:2s}
+
+/* dark overlay on top of photos */
+.bg-overlay{
+  position:fixed;inset:0;z-index:1;
+  background:
+    linear-gradient(
+      to bottom,
+      rgba(4,6,16,0.55) 0%,
+      rgba(4,6,16,0.30) 30%,
+      rgba(4,6,16,0.35) 60%,
+      rgba(4,6,16,0.80) 85%,
+      rgba(3,4,12,0.95) 100%
+    );
+}
+
+/* color tint — gives it the deep blue freight terminal feel */
+.bg-tint{
+  position:fixed;inset:0;z-index:2;
+  background:
+    radial-gradient(ellipse 100% 60% at 50% 50%, rgba(0,20,60,0.45) 0%, transparent 70%),
+    radial-gradient(ellipse 60% 80% at 0% 50%, rgba(0,10,40,0.5) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 80% at 100% 50%, rgba(0,10,40,0.5) 0%, transparent 60%);
+  mix-blend-mode:multiply;
+}
+
+/* vignette */
+.vignette{
+  position:fixed;inset:0;z-index:3;
+  background:radial-gradient(ellipse 110% 110% at 50% 50%,
+    transparent 35%,
+    rgba(2,4,14,0.55) 65%,
+    rgba(2,4,14,0.85) 100%
+  );
+  pointer-events:none;
+}
+
+/* scan line */
+.scanline{
+  position:fixed;left:0;right:0;height:1px;z-index:4;
+  background:linear-gradient(90deg,
+    transparent,rgba(50,100,220,0.06),rgba(60,120,255,0.1),rgba(50,100,220,0.06),transparent
+  );
+  animation:scan 14s linear infinite;
+  pointer-events:none;
+}
+
+/* slide progress dots */
+.slide-dots{
+  position:fixed;bottom:28px;left:50%;transform:translateX(-50%);
+  z-index:20;
+  display:flex;gap:8px;align-items:center;
+}
+.sdot{
+  width:20px;height:2px;border-radius:2px;
+  background:rgba(255,255,255,0.2);
+  cursor:pointer;transition:all .3s;
+}
+.sdot.active{background:rgba(91,158,255,0.8);width:32px}
+
+/* ══════════════════════════════════════
+   NAV
+══════════════════════════════════════ */
+.nav{
+  position:fixed;top:0;left:0;right:0;z-index:20;
+  padding:24px 44px;
+  display:flex;align-items:center;justify-content:space-between;
+  background:linear-gradient(to bottom,rgba(3,4,14,0.7),transparent);
+}
+.nav-logo{display:flex;align-items:center;gap:10px}
+.nav-chip{
+  width:32px;height:32px;border-radius:8px;
+  background:linear-gradient(135deg,#1833AA,#2855EE,#3B8BFF);
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 0 18px rgba(40,85,238,0.45);
+}
+.nav-chip svg{width:17px;height:17px}
+.nav-name{
+  font-family:'Inter',sans-serif;
+  font-size:17px;font-weight:800;
+  color:white;letter-spacing:-0.2px;
+}
+.nav-name span{color:#5B9EFF}
+.nav-links{display:flex;gap:28px;align-items:center}
+.nav-link{
+  font-size:12px;color:rgba(180,200,230,0.45);
+  text-decoration:none;transition:color .2s;letter-spacing:0.3px;
+}
+.nav-link:hover{color:rgba(180,200,230,0.85)}
+.nav-link.cta{
+  color:rgba(91,158,255,0.75);
+  border:1px solid rgba(91,158,255,0.2);
+  padding:6px 16px;border-radius:20px;
+  background:rgba(91,158,255,0.06);
+  transition:all .2s;
+}
+.nav-link.cta:hover{
+  color:white;
+  background:rgba(91,158,255,0.12);
+  border-color:rgba(91,158,255,0.35);
+}
+
+/* ══════════════════════════════════════
+   MAIN HERO
+══════════════════════════════════════ */
+.main{
+  position:fixed;inset:0;z-index:10;
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  text-align:center;
+  padding:0 24px;
+}
+
+.eyebrow{
+  display:inline-flex;align-items:center;gap:8px;
+  background:rgba(255,255,255,0.06);
+  border:1px solid rgba(255,255,255,0.1);
+  border-radius:100px;padding:6px 16px;
+  backdrop-filter:blur(16px);
+  margin-bottom:24px;
+  animation:fadeUp .9s cubic-bezier(0.16,1,0.3,1) both;
+  animation-delay:.1s;
+}
+.eyebrow-dot{
+  width:6px;height:6px;border-radius:50%;
+  background:#5B9EFF;
+  animation:pulseDot 2s ease-in-out infinite;
+}
+.eyebrow-txt{
+  font-size:11px;color:rgba(160,190,240,0.8);
+  letter-spacing:1.8px;text-transform:uppercase;
+}
+
+.hero-title{
+  font-family:'Inter',sans-serif;
+  font-size:clamp(44px,6.5vw,76px);
+  font-weight:800;line-height:1.05;
+  letter-spacing:-1px;
+  color:white;
+  margin-bottom:20px;
+  animation:fadeUp .9s cubic-bezier(0.16,1,0.3,1) both;
+  animation-delay:.2s;
+  text-shadow:0 2px 40px rgba(0,0,0,0.5);
+}
+.hero-title .blue{
+  color:transparent;
+  background:linear-gradient(135deg,#4B8BFF 0%,#6BA8FF 50%,#9ECBFF 100%);
+  -webkit-background-clip:text;background-clip:text;
+}
+
+.hero-sub{
+  font-family:'Inter',sans-serif;
+  font-size:15px;font-weight:300;
+  color:rgba(185,205,235,0.65);
+  line-height:1.75;
+  max-width:480px;
+  margin:0 auto 40px auto;
+  text-align:center;
+  animation:fadeUp .9s cubic-bezier(0.16,1,0.3,1) both;
+  animation-delay:.32s;
+}
+.hero-sub strong{
+  color:rgba(120,175,255,0.9);font-weight:400;
+}
+
+/* CTA */
+.cta-wrap{
+  display:flex;flex-direction:column;align-items:center;gap:14px;
+  animation:fadeUp .9s cubic-bezier(0.16,1,0.3,1) both;
+  animation-delay:.44s;
+}
+.cta-btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:10px;
+  background:linear-gradient(135deg,#1E3FBB,#2855EE,#3B7FFF);
+  color:white;border:none;border-radius:100px;
+  padding:14px 32px;
+  font-family:'Inter',sans-serif;
+  font-size:15px;font-weight:600;letter-spacing:0.2px;
+  cursor:pointer;
+  position:relative;overflow:hidden;
+  box-shadow:0 0 0 1px rgba(255,255,255,0.13) inset,0 8px 40px rgba(28,63,187,0.55),0 2px 8px rgba(0,0,0,0.4);
+  transition:transform .2s,box-shadow .2s;
+  white-space:nowrap;
+}
+.cta-btn::before{
+  content:'';position:absolute;
+  top:0;left:-100%;width:55%;height:100%;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,0.13),transparent);
+  transition:left .5s;
+}
+.cta-btn:hover{
+  transform:translateY(-2px);
+  box-shadow:0 0 0 1px rgba(255,255,255,0.18) inset,0 14px 48px rgba(28,63,187,0.7),0 2px 8px rgba(0,0,0,0.4);
+}
+.cta-btn:hover::before{left:160%}
+.cta-btn:active{transform:translateY(0)}
+.cta-arrow{
+  width:22px;height:22px;border-radius:50%;
+  background:rgba(255,255,255,0.18);
+  display:flex;align-items:center;justify-content:center;
+  font-size:12px;flex-shrink:0;
+}
+.cta-note{font-size:11px;color:rgba(140,170,215,0.35);letter-spacing:0.3px}
+
+
+
+/* ══════════════════════════════════════
+   FOOTER
+══════════════════════════════════════ */
+.footer{
+  position:fixed;bottom:0;left:0;right:0;z-index:20;
+  padding:14px 44px 48px;
+  display:flex;align-items:center;justify-content:space-between;
+  background:linear-gradient(to top,rgba(3,4,14,0.85),transparent);
+  pointer-events:none;
+}
+.footer-txt{font-size:11px;color:rgba(120,150,195,0.35);letter-spacing:0.3px}
+.footer-txt span{color:rgba(120,150,195,0.5)}
+.footer-right{
+  display:flex;gap:16px;
+  pointer-events:all;
+}
+.footer-link{font-size:11px;color:rgba(120,150,195,0.3);text-decoration:none;transition:color .2s}
+.footer-link:hover{color:rgba(120,150,195,0.7)}
+
+/* ══════════════════════════════════════
+   LOGIN MODAL
+══════════════════════════════════════ */
+.modal-bd{
+  position:fixed;inset:0;z-index:100;
+  background:rgba(2,4,14,0.65);
+  backdrop-filter:blur(10px);
+  -webkit-backdrop-filter:blur(10px);
+  display:flex;align-items:center;justify-content:center;
+  padding:20px;
+  opacity:0;pointer-events:none;
+  transition:opacity .3s;
+}
+.modal-bd.show{opacity:1;pointer-events:all}
+
+.modal{
+  background:rgba(8,12,22,0.94);
+  border:1px solid rgba(255,255,255,0.07);
+  border-radius:20px;
+  padding:44px 40px 36px;
+  width:100%;max-width:410px;
+  backdrop-filter:blur(40px);
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.04) inset,
+    0 30px 90px rgba(0,0,0,0.75),
+    0 0 80px rgba(28,63,187,0.1);
+  transform:translateY(14px) scale(0.98);
+  transition:transform .35s cubic-bezier(0.16,1,0.3,1),opacity .3s;
+  position:relative;overflow:hidden;
+  opacity:0;
+}
+.modal-bd.show .modal{transform:translateY(0) scale(1);opacity:1}
+
+/* top accent line */
+.modal::before{
+  content:'';position:absolute;
+  top:0;left:15%;right:15%;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(60,120,255,0.55),rgba(91,158,255,0.7),rgba(60,120,255,0.55),transparent);
+}
+
+/* inner ambient glow */
+.modal::after{
+  content:'';position:absolute;
+  top:-50px;left:50%;transform:translateX(-50%);
+  width:200px;height:100px;
+  background:radial-gradient(ellipse,rgba(30,63,187,0.18),transparent 70%);
+  pointer-events:none;
+}
+
+.m-close{
+  position:absolute;top:16px;right:16px;
+  background:rgba(255,255,255,0.04);
+  border:1px solid rgba(255,255,255,0.07);
+  border-radius:7px;width:28px;height:28px;
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;color:rgba(160,185,225,0.35);
+  font-size:13px;transition:all .15s;
+  z-index:1;
+}
+.m-close:hover{color:white;background:rgba(255,255,255,0.09)}
+
+.m-logo{display:flex;align-items:center;gap:10px;margin-bottom:26px;position:relative;z-index:1}
+.m-chip{
+  width:34px;height:34px;border-radius:9px;
+  background:linear-gradient(135deg,#1833AA,#2855EE,#4B9BFF);
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 0 16px rgba(40,85,238,0.4);
+}
+.m-chip svg{width:17px;height:17px}
+.m-brand{font-family:'Inter',sans-serif;font-size:17px;font-weight:800;color:white}
+.m-brand span{color:#5B9EFF}
+
+.m-title{
+  font-family:'Inter',sans-serif;
+  font-size:22px;font-weight:700;color:white;
+  margin-bottom:5px;position:relative;z-index:1;
+}
+.m-sub{
+  font-size:12px;color:rgba(155,180,220,0.45);
+  margin-bottom:30px;line-height:1.55;position:relative;z-index:1;
+}
+
+.field{margin-bottom:14px;position:relative;z-index:1}
+.field label{
+  display:block;font-size:9.5px;font-weight:500;
+  letter-spacing:1.5px;text-transform:uppercase;
+  color:rgba(120,155,200,0.4);margin-bottom:6px;
+}
+.field input{
+  width:100%;
+  background:rgba(255,255,255,0.04);
+  border:1px solid rgba(255,255,255,0.07);
+  border-radius:10px;padding:12px 15px;
+  font-size:13px;font-family:'Geist','Helvetica Neue',sans-serif;
+  color:white;outline:none;
+  transition:border-color .2s,background .2s,box-shadow .2s;
+}
+.field input::placeholder{color:rgba(110,145,195,0.25)}
+.field input:focus{
+  border-color:rgba(60,120,255,0.4);
+  background:rgba(40,90,255,0.05);
+  box-shadow:0 0 0 3px rgba(40,90,255,0.09);
+}
+
+.m-meta{
+  display:flex;justify-content:space-between;align-items:center;
+  margin-bottom:22px;position:relative;z-index:1;
+}
+.m-rem{display:flex;align-items:center;gap:7px;cursor:pointer}
+.m-rem input{accent-color:#5B9EFF;cursor:pointer;width:13px;height:13px}
+.m-rem span{font-size:11px;color:rgba(145,175,220,0.4)}
+.m-forgot{font-size:11px;color:rgba(60,120,255,0.5);text-decoration:none;transition:color .2s}
+.m-forgot:hover{color:rgba(91,158,255,0.9)}
+
+.m-btn{
+  width:100%;position:relative;z-index:1;
+  background:linear-gradient(135deg,#1E3FBB,#2855EE,#4080FF);
+  color:white;border:none;border-radius:10px;
+  padding:13px;
+  font-family:'Inter',sans-serif;
+  font-size:13px;font-weight:600;letter-spacing:0.2px;
+  cursor:pointer;
+  box-shadow:0 4px 22px rgba(28,63,187,0.45);
+  transition:opacity .2s,transform .15s;
+  overflow:hidden;
+}
+.m-btn::before{
+  content:'';position:absolute;
+  top:0;left:-100%;width:50%;height:100%;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,0.12),transparent);
+  transition:left .4s;
+}
+.m-btn:hover::before{left:150%}
+.m-btn:hover{opacity:.88;transform:translateY(-1px)}
+.m-btn:active{transform:translateY(0)}
+
+.m-pills{
+  margin-top:24px;padding-top:18px;
+  border-top:1px solid rgba(255,255,255,0.05);
+  display:flex;flex-direction:column;gap:8px;align-items:center;
+  position:relative;z-index:1;
+}
+.m-pills-lbl{font-size:9px;color:rgba(90,125,175,0.35);letter-spacing:1.8px;text-transform:uppercase}
+.m-pills-row{display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
+.mpill{
+  font-size:9.5px;color:rgba(120,158,210,0.38);
+  background:rgba(255,255,255,0.03);
+  border:1px solid rgba(255,255,255,0.05);
+  border-radius:100px;padding:3px 10px;
+  letter-spacing:0.2px;
+}
+
+/* ══════════════════════════════════════
+   ANIMATIONS
+══════════════════════════════════════ */
+@keyframes fadeUp{
+  from{opacity:0;transform:translateY(18px)}
+  to{opacity:1;transform:translateY(0)}
+}
+@keyframes slowZoom{
+  from{transform:scale(1.0)}
+  to{transform:scale(1.08)}
+}
+@keyframes scan{
+  from{top:-2px}
+  to{top:100vh}
+}
+@keyframes pulseDot{
+  0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(91,158,255,0.5)}
+  50%{opacity:0.5;box-shadow:0 0 0 5px rgba(91,158,255,0)}
+}
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════
+     BACKGROUND SLIDESHOW
+     Unsplash free-to-use logistics images
+══════════════════════════════════════ -->
+<div class="bg-slideshow" id="slideshow">
+  <!-- Slide 1: Container ship aerial -->
+  <div class="bg-slide active" style="background-image:url('https://images.unsplash.com/photo-1578575437130-527eed3abbec?w=1920&q=80&fit=crop&crop=center')"></div>
+  <!-- Slide 2: Port container yard -->
+  <div class="bg-slide" style="background-image:url('https://images.unsplash.com/photo-1494412574643-ff11b0a5c1c3?w=1920&q=80&fit=crop&crop=center')"></div>
+  <!-- Slide 3: Cargo operations -->
+  <div class="bg-slide" style="background-image:url('https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?w=1920&q=80&fit=crop&crop=center')"></div>
+  <!-- Slide 4: Air freight / cargo plane -->
+  <div class="bg-slide" style="background-image:url('https://images.unsplash.com/photo-1528702748617-c64d49f918af?w=1920&q=80&fit=crop&crop=center')"></div>
+  <!-- Slide 5: Warehouse / logistics operations -->
+  <div class="bg-slide" style="background-image:url('https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=1920&q=80&fit=crop&crop=center')"></div>
+</div>
+
+<div class="bg-overlay"></div>
+<div class="bg-tint"></div>
+<div class="vignette"></div>
+<div class="scanline"></div>
+
+<!-- ══════════════════════════════════════ NAV ══ -->
+<nav class="nav">
+  <div class="nav-logo">
+    <div class="nav-chip">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M3 12 Q6 6 9 12 Q12 18 15 12 Q18 6 21 12" stroke="white" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <span class="nav-name">Flowgentic <span>TRAK</span></span>
+  </div>
+  <div class="nav-links">
+    <a href="#" class="nav-link">Docs</a>
+    <a href="#" class="nav-link">Support</a>
+    <a href="#" class="nav-link cta" onclick="openModal();return false">Sign In</a>
+  </div>
+</nav>
+
+<!-- ══════════════════════════════════════ HERO ══ -->
+<div class="main">
+  <div>
+    <div class="eyebrow">
+      <span class="eyebrow-dot"></span>
+      <span class="eyebrow-txt">Conversational AI for Freight Forwarding</span>
+    </div>
+
+    <h1 class="hero-title">
+      Flowgentic <span class="blue">TRAK</span>
+    </h1>
+
+    <p class="hero-sub">
+      The Conversational Agentic AI layer on top of<br>
+      <strong>World-Trak, Dispatch-Trak & Account-Trak.</strong><br>
+      Your freight crew. Available 24/7.
+    </p>
+
+    <div class="cta-wrap">
+      <button class="cta-btn" onclick="openModal()">
+        Sign In to Flowgentic TRAK
+        <span class="cta-arrow">→</span>
+      </button>
+
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════ FOOTER ══ -->
+<footer class="footer">
+  <div class="footer-txt">© 2026 <span>Flowgentic AI.</span> All rights reserved.</div>
+  <div class="footer-right">
+    <a href="#" class="footer-link">Privacy</a>
+    <a href="#" class="footer-link">Terms</a>
+    <a href="#" class="footer-link">Contact</a>
+  </div>
+</footer>
+
+<!-- slide dots -->
+<div class="slide-dots" id="dots"></div>
+
+<!-- ══════════════════════════════════════ MODAL ══ -->
+<div class="modal-bd" id="modal-bd" onclick="handleBd(event)">
+  <div class="modal" id="modal">
+    <button class="m-close" onclick="closeModal()">✕</button>
+
+    <div class="m-logo">
+      <div class="m-chip">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M3 12 Q6 6 9 12 Q12 18 15 12 Q18 6 21 12" stroke="white" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div class="m-brand">Flowgentic <span>TRAK</span></div>
+    </div>
+
+    <div class="m-title">Welcome back</div>
+    <div class="m-sub">Sign in to monitor your AI crew on World-Trak.</div>
+
+    <form onsubmit="handleLogin(event)">
+      <div class="field">
+        <label for="em">Work Email</label>
+        <input id="em" type="email" placeholder="you@saturnfreight.com" autocomplete="email"/>
+      </div>
+      <div class="field">
+        <label for="pw">Password</label>
+        <input id="pw" type="password" placeholder="••••••••••" autocomplete="current-password"/>
+      </div>
+      <div class="m-meta">
+        <label class="m-rem">
+          <input type="checkbox"/>
+          <span>Keep me signed in</span>
+        </label>
+        <a href="#" class="m-forgot">Forgot password?</a>
+      </div>
+      <button type="submit" class="m-btn" id="m-btn">Sign In to Flowgentic TRAK →</button>
+    </form>
+
+    <div class="m-pills">
+      <div class="m-pills-lbl">Connected to</div>
+      <div class="m-pills-row">
+        <span class="mpill">World-Trak</span>
+        <span class="mpill">Dispatch-Trak</span>
+        <span class="mpill">Account-Trak</span>
+        <span class="mpill">LTL-Trak</span>
+        <span class="mpill">WMS-Trak</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ── slideshow ── */
+var slides=document.querySelectorAll('.bg-slide');
+var dotsEl=document.getElementById('dots');
+var cur=0;
+var total=slides.length;
+var autoTimer=null;
+
+/* build dots */
+for(var i=0;i<total;i++){
+  var d=document.createElement('div');
+  d.className='sdot'+(i===0?' active':'');
+  d.dataset.i=i;
+  d.onclick=(function(idx){return function(){goSlide(idx);resetAuto();};})(i);
+  dotsEl.appendChild(d);
+}
+
+function goSlide(n){
+  slides[cur].classList.remove('active');
+  document.querySelectorAll('.sdot')[cur].classList.remove('active');
+  cur=n;
+  slides[cur].classList.add('active');
+  document.querySelectorAll('.sdot')[cur].classList.add('active');
+}
+
+function nextSlide(){goSlide((cur+1)%total);}
+
+function startAuto(){autoTimer=setInterval(nextSlide,5500);}
+function resetAuto(){clearInterval(autoTimer);startAuto();}
+
+startAuto();
+
+/* ── modal ── */
+function openModal(){document.getElementById('modal-bd').classList.add('show');}
+function closeModal(){document.getElementById('modal-bd').classList.remove('show');}
+function handleBd(e){if(e.target===document.getElementById('modal-bd'))closeModal();}
+document.addEventListener('keydown',function(e){if(e.key==='Escape')closeModal();});
+
+/* ── login ── */
+function handleLogin(e){
+  e.preventDefault();
+  var btn=document.getElementById('m-btn');
+  btn.textContent='Authenticating…';
+  btn.style.opacity='0.65';
+  btn.disabled=true;
+  setTimeout(function(){
+    btn.style.background='linear-gradient(135deg,#065F46,#059669,#34D399)';
+    btn.style.boxShadow='0 4px 22px rgba(52,211,153,0.45)';
+    btn.style.opacity='1';
+    btn.textContent='✓ Signed In — Redirecting…';
+  },1600);
+}
+
+/* ── preload images silently ── */
+var imgUrls=[
+  'https://images.unsplash.com/photo-1494412574643-ff11b0a5c1c3?w=1920&q=80',
+  'https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?w=1920&q=80',
+  'https://images.unsplash.com/photo-1528702748617-c64d49f918af?w=1920&q=80',
+  'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=1920&q=80',
+];
+imgUrls.forEach(function(u){var i=new Image();i.src=u;});
+</script>
+</body>
+</html>

@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "n8n-mcp": {
+      "command": "npx",
+      "args": ["-y", "n8n-mcp"],
+      "env": {
+        "N8N_API_URL": "https://n8n.srv1404101.hstgr.cloud/api/v1",
+        "N8N_API_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxYTU1NTkxMC04YTViLTQ3NmItYWMwNy1lNDhhZjBhMTkyZmIiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwianRpIjoiNjk4MzkwNGYtZjJkMy00YWM3LTkwMmQtMmY4MTM5MDlkNTI5IiwiaWF0IjoxNzgwMjQxODU4fQ.sLfZqG76ZaXknB_wa9A7v2SGN7z2aWlmdEM95gBmj14"
+      }
+    },
+    "supabase": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@supabase/mcp-server-supabase@latest",
+        "--supabase-url", "https://xfhegmlpfqqbipzngjcu.supabase.co",
+        "--supabase-key", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhmaGVnbWxwZnFxYmlwem5namN1Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MDIzNjMxMCwiZXhwIjoyMDk1ODEyMzEwfQ.1yroybb6DGaNRS4gsJCrVbieEw6zv5x7Ztxu7gjnxxA"
+      ]
+    },
+    "livekit-docs": {
+      "type": "http",
+      "url": "https://docs.livekit.io/mcp"
+    }
+  }
+}
