@@ -575,11 +575,14 @@ body{font-family:var(--font-sans);font-size:var(--text-base);color:var(--text-pr
 // ── Config ───────────────────────────────────────────────────
 const SUPA_URL    = 'https://xfhegmlpfqqbipzngjcu.supabase.co';
 const SUPA_ANON   = 'sb_publishable_I7CK8LBaIZpspmO2cX43PQ_fX9MzZVI';
-const LK_API_KEY    = 'APITdSxhr7LFtFv';
-const LK_API_SECRET = 'plYaMr0rbwVMwUkGFf3wOSq7E9faHFF7vEfW1SpCobVA';
-const LK_WS_URL     = 'wss://flow-crew-wlm418hq.livekit.cloud';
 
-function newRoomName() { return 'crew-' + Math.random().toString(36).slice(2,9); }
+// Single LiveKit project — persona is determined by room name prefix (lt- / cc- / ar-)
+const LK_API_KEY    = 'APIDLrS54kQE5Xq';
+const LK_API_SECRET = '0IrflhGErY1tMakBOUC4HfzKSMnlvYy7fHHrtbJNglvA';
+const LK_WS_URL     = 'wss://flowgentic-trak-91ox6qih.livekit.cloud';
+const AGENT_NAME    = 'my-agent';
+
+function newRoomName(prefix) { return (prefix||'lt') + '-' + Math.random().toString(36).slice(2,9); }
 
 const { createClient } = supabase;
 const db = createClient(SUPA_URL, SUPA_ANON);
@@ -780,15 +783,17 @@ async function makeAdminToken(room,apiKey,apiSecret) {
   const now=Math.floor(Date.now()/1000);
   return signJWT({iss:apiKey,exp:now+300,nbf:now,video:{room,roomCreate:true,roomAdmin:true}},apiSecret);
 }
-async function dispatchAgent(room,wsUrl,apiKey,apiSecret,agentName) {
+async function dispatchAgent(room,wsUrl,apiKey,apiSecret,agentName,useCase) {
   try {
     const tok=await makeAdminToken(room,apiKey,apiSecret);
     const httpUrl=wsUrl.replace('wss://','https://');
+    const body={room,agentName};
+    if (useCase) body.metadata=JSON.stringify({use_case:useCase});
     const res=await fetch(`${httpUrl}/twirp/livekit.AgentDispatchService/CreateDispatch`,
       {method:'POST',headers:{'Authorization':'Bearer '+tok,'Content-Type':'application/json'},
-       body:JSON.stringify({room,agentName})});
+       body:JSON.stringify(body)});
     if (!res.ok) dbg('Dispatch error '+res.status);
-    else dbg('Dispatch OK — '+agentName+' inbound');
+    else dbg('Dispatch OK — '+agentName+' · persona: '+(useCase||'default'));
   } catch(e) { dbg('Dispatch failed: '+e.message); }
 }
 
@@ -801,7 +806,7 @@ function setTopbarCallState(state, label) {
   const rst  = document.getElementById('reset-btn');
   btn.className = 'btn-call' + (state==='active'?' call-active':state==='connecting'?' call-connecting':'');
   btn.disabled  = state==='connecting';
-  lbl.textContent = label || (state==='active'?'End Call':state==='connecting'?'Connecting…':'Call Aria');
+  lbl.textContent = label || (state==='active'?'End Call':state==='connecting'?'Connecting…':TAB_BTN_LABEL.lt);
   if (state==='active') { pill.className='status-pill live'; txt.textContent='Live'; }
   else if (state==='idle') {
     const anyActive = hasNewLoad||ccHasCallMade||arHasCallMade;
@@ -826,9 +831,9 @@ async function startCall() {
   showError(''); dbg('Starting LT call…');
   try {
     if (typeof LivekitClient==='undefined') throw new Error('LiveKit SDK not loaded.');
-    const room=newRoomName();
+    const room=newRoomName('lt');
     const token=await makeParticipantToken(room,LK_API_KEY,LK_API_SECRET);
-    dbg('Token ready · room: '+room);
+    dbg('Token ready · room: '+room+' (persona: load_tender)');
     lkRoom=new LivekitClient.Room({adaptiveStream:true,dynacast:true});
     lkRoom.on(LivekitClient.RoomEvent.Disconnected,()=>{ callState='idle'; setTopbarCallState('idle'); hideCallModal(); });
     lkRoom.on(LivekitClient.RoomEvent.TrackSubscribed,(track,_pub,participant)=>{
@@ -858,7 +863,7 @@ async function startCall() {
         try { const text=await reader.readAll(); updateTranscriptEl(id,text,isAgent,true,'feed-lt'); } catch(e){}
       });
     }
-    await dispatchAgent(room,LK_WS_URL,LK_API_KEY,LK_API_SECRET,'my-agent');
+    await dispatchAgent(room,LK_WS_URL,LK_API_KEY,LK_API_SECRET,AGENT_NAME,'load_tender');
     await lkRoom.startAudio();
     await lkRoom.localParticipant.setMicrophoneEnabled(true);
     callState='active'; setTopbarCallState('active');
@@ -911,6 +916,13 @@ async function resetDemo() {
   await loadData();
 }
 
+// Button labels per tab (idle state)
+const TAB_BTN_LABEL = {
+  lt: 'Call Aria · Load Tender',
+  cc: 'Call Aria · Track & Trace',
+  ar: 'Call Aria · AR Collections',
+};
+
 // ── Tab switching ─────────────────────────────────────────────
 function switchTab(tab) {
   activeTab=tab;
@@ -929,15 +941,16 @@ function switchTab(tab) {
 
 function syncCCBtn() {
   const btn=document.getElementById('call-btn'), lbl=document.getElementById('call-label');
-  btn.className='btn-call'+(ccAutoRunning?' call-active':'');
-  btn.disabled=false;
-  lbl.textContent=ccAutoRunning?'Stop Sequence':'Call Aria';
+  const active = ccCallState==='active'||ccAutoRunning;
+  btn.className='btn-call'+(active?' call-active':ccCallState==='connecting'?' call-connecting':'');
+  btn.disabled = ccCallState==='connecting';
+  lbl.textContent = ccCallState==='connecting'?'Connecting…':active?'End Call':TAB_BTN_LABEL.cc;
 }
 function syncARBtn() {
   const btn=document.getElementById('call-btn'), lbl=document.getElementById('call-label');
   btn.className='btn-call'+(arCallState==='active'?' call-active':arCallState==='connecting'?' call-connecting':'');
   btn.disabled=arCallState==='connecting';
-  lbl.textContent=arCallState==='active'?'End Call':arCallState==='connecting'?'Connecting…':'Call Aria';
+  lbl.textContent=arCallState==='active'?'End Call':arCallState==='connecting'?'Connecting…':TAB_BTN_LABEL.ar;
 }
 
 function activeToggleCall() {
@@ -985,13 +998,9 @@ function showError(msg) {
 }
 
 // ══════════════════════════════════════════════════════════════
-// TRACK & TRACE (CC) — Supabase + LiveKit
+// TRACK & TRACE (CC) — same LK project, persona: carrier_check
+// room prefix 'cc-' tells the agent to load the CarrierCheckAgent
 // ══════════════════════════════════════════════════════════════
-const CC_LK_API_KEY    = 'PLACEHOLDER_CC_API_KEY';
-const CC_LK_API_SECRET = 'PLACEHOLDER_CC_API_SECRET';
-const CC_LK_WS_URL     = 'wss://PLACEHOLDER.livekit.cloud';
-const CC_AGENT_NAME    = 'PLACEHOLDER_CC_AGENT';
-
 let ccLoads=[], ccHasCallMade=false, ccLkRoom=null, ccCallState='idle';
 const ccTranscripts=new Map();
 let ccAutoRunning=false, ccDialerInt=null, ccDialerSecs=0;
@@ -1064,26 +1073,27 @@ function subscribeCCRealtime() {
 }
 
 function startCCSequence() {
-  ccAutoRunning=true; syncCCBtn();
-  const pill=document.getElementById('statusPill'), txt=document.getElementById('statusText');
-  pill.className='status-pill live'; txt.textContent='Live';
+  if (ccCallState==='idle') ccStartCall();
 }
 function stopCCSequence() {
+  if (ccCallState==='active') ccEndCall();
   ccAutoRunning=false; clearInterval(ccDialerInt);
   document.getElementById('liveDialerCard').classList.remove('visible');
-  syncCCBtn();
-  const pill=document.getElementById('statusPill'), txt=document.getElementById('statusText');
-  pill.className='status-pill connecting'; txt.textContent='Ready';
 }
 
 async function ccStartCall() {
-  ccCallState='connecting'; syncCCBtn();
+  ccCallState='connecting'; ccAutoRunning=true; syncCCBtn(); showError('');
+  dbg('Starting CC call… (persona: carrier_check)');
   try {
     if (typeof LivekitClient==='undefined') throw new Error('LiveKit SDK not loaded.');
-    const room='cc-'+Math.random().toString(36).slice(2,9);
-    const token=await makeParticipantToken(room,CC_LK_API_KEY,CC_LK_API_SECRET);
+    const room=newRoomName('cc');
+    const token=await makeParticipantToken(room,LK_API_KEY,LK_API_SECRET);
+    dbg('Token ready · room: '+room+' (persona: carrier_check)');
     ccLkRoom=new LivekitClient.Room({adaptiveStream:true,dynacast:true});
-    ccLkRoom.on(LivekitClient.RoomEvent.Disconnected,()=>{ ccCallState='idle'; syncCCBtn(); });
+    ccLkRoom.on(LivekitClient.RoomEvent.Disconnected,()=>{
+      ccCallState='idle'; ccAutoRunning=false; syncCCBtn();
+      document.getElementById('liveDialerCard').classList.remove('visible');
+    });
     ccLkRoom.on(LivekitClient.RoomEvent.TrackSubscribed,(track,_pub,p)=>{
       if (track.kind===LivekitClient.Track.Kind.Audio) {
         const el=track.attach(); el.dataset.lkParticipant='cc-'+p.sid; document.body.appendChild(el);
@@ -1093,7 +1103,7 @@ async function ccStartCall() {
     ccLkRoom.on(LivekitClient.RoomEvent.ActiveSpeakersChanged,spk=>{
       if (activeTab==='cc') updateAudioBars(spk.some(p=>p!==ccLkRoom.localParticipant));
     });
-    await ccLkRoom.connect(CC_LK_WS_URL,token);
+    await ccLkRoom.connect(LK_WS_URL,token); dbg('[CC] Connected');
     if (typeof ccLkRoom.registerTextStreamHandler==='function') {
       ccLkRoom.registerTextStreamHandler('lk.transcription',async(reader,pInfo)=>{
         const attrs=(reader.info&&reader.info.attributes)||{};
@@ -1102,19 +1112,26 @@ async function ccStartCall() {
         if (!segId&&!isFinal) return;
         try { const text=await reader.readAll(); ccUpdateTranscript(segId||('cc-'+Date.now()),text,isAgent,isFinal); } catch(e){}
       });
+      ccLkRoom.registerTextStreamHandler('lk.chat',async(reader,pInfo)=>{
+        const isAgent=pInfo.identity!==ccLkRoom.localParticipant.identity;
+        try { const text=await reader.readAll(); ccUpdateTranscript('chat-'+Date.now(),text,isAgent,true); } catch(e){}
+      });
     }
-    await dispatchAgent(room,CC_LK_WS_URL,CC_LK_API_KEY,CC_LK_API_SECRET,CC_AGENT_NAME);
+    await dispatchAgent(room,LK_WS_URL,LK_API_KEY,LK_API_SECRET,AGENT_NAME,'carrier_check');
     await ccLkRoom.startAudio();
     await ccLkRoom.localParticipant.setMicrophoneEnabled(true);
     ccCallState='active'; syncCCBtn();
-  } catch(err) { dbg('[CC] ERROR: '+(err.message||err)); ccCallState='idle'; syncCCBtn(); showError(err.message||'CC failed'); }
+    document.getElementById('liveDialerCard').classList.add('visible');
+    dbg('[CC] Call live — Aria carrier_check persona active');
+  } catch(err) { dbg('[CC] ERROR: '+(err.message||err)); ccCallState='idle'; ccAutoRunning=false; syncCCBtn(); showError(err.message||'CC call failed'); }
 }
 
 async function ccEndCall() {
   if (ccLkRoom) { await ccLkRoom.disconnect(); ccLkRoom=null; }
   document.querySelectorAll('audio[data-lk-participant^="cc-"]').forEach(el=>el.remove());
   ccTranscripts.forEach(el=>el.classList.add('tx-done')); ccTranscripts.clear();
-  ccCallState='idle'; syncCCBtn();
+  ccAutoRunning=false; ccCallState='idle'; syncCCBtn();
+  document.getElementById('liveDialerCard').classList.remove('visible');
 }
 
 async function resetCCDemo() {
@@ -1127,12 +1144,9 @@ async function resetCCDemo() {
 }
 
 // ══════════════════════════════════════════════════════════════
-// AR COLLECTIONS — separate LiveKit
+// AR COLLECTIONS — same LK project, persona: ar_collections
+// room prefix 'ar-' tells the agent to load the ARCollectionsAgent
 // ══════════════════════════════════════════════════════════════
-const AR_LK_API_KEY    = 'PLACEHOLDER_AR_API_KEY';
-const AR_LK_API_SECRET = 'PLACEHOLDER_AR_API_SECRET';
-const AR_LK_WS_URL     = 'wss://PLACEHOLDER.livekit.cloud';
-const AR_AGENT_NAME    = 'PLACEHOLDER_AR_AGENT';
 
 let arAccounts=[], arHasCallMade=false, arLkRoom=null, arCallState='idle';
 const arTranscripts=new Map();
@@ -1216,10 +1230,12 @@ function arToggleCall() {
 
 async function arStartCall() {
   arCallState='connecting'; syncARBtn(); showError('');
+  dbg('Starting AR call… (persona: ar_collections)');
   try {
     if (typeof LivekitClient==='undefined') throw new Error('LiveKit SDK not loaded.');
-    const room='ar-'+Math.random().toString(36).slice(2,9);
-    const token=await makeParticipantToken(room,AR_LK_API_KEY,AR_LK_API_SECRET);
+    const room=newRoomName('ar');
+    const token=await makeParticipantToken(room,LK_API_KEY,LK_API_SECRET);
+    dbg('Token ready · room: '+room+' (persona: ar_collections)');
     arLkRoom=new LivekitClient.Room({adaptiveStream:true,dynacast:true});
     arLkRoom.on(LivekitClient.RoomEvent.Disconnected,()=>{ arCallState='idle'; syncARBtn(); hideCallModal(); });
     arLkRoom.on(LivekitClient.RoomEvent.TrackSubscribed,(track,_pub,p)=>{
@@ -1231,7 +1247,7 @@ async function arStartCall() {
     arLkRoom.on(LivekitClient.RoomEvent.ActiveSpeakersChanged,spk=>{
       if (activeTab==='ar') updateAudioBars(spk.some(p=>p!==arLkRoom.localParticipant));
     });
-    await arLkRoom.connect(AR_LK_WS_URL,token);
+    await arLkRoom.connect(LK_WS_URL,token); dbg('[AR] Connected');
     if (typeof arLkRoom.registerTextStreamHandler==='function') {
       arLkRoom.registerTextStreamHandler('lk.transcription',async(reader,pInfo)=>{
         const attrs=(reader.info&&reader.info.attributes)||{};
@@ -1240,13 +1256,18 @@ async function arStartCall() {
         if (!segId&&!isFinal) return;
         try { const text=await reader.readAll(); arUpdateTranscript(segId||('ar-'+Date.now()),text,isAgent,isFinal); } catch(e){}
       });
+      arLkRoom.registerTextStreamHandler('lk.chat',async(reader,pInfo)=>{
+        const isAgent=pInfo.identity!==arLkRoom.localParticipant.identity;
+        try { const text=await reader.readAll(); arUpdateTranscript('chat-'+Date.now(),text,isAgent,true); } catch(e){}
+      });
     }
-    await dispatchAgent(room,AR_LK_WS_URL,AR_LK_API_KEY,AR_LK_API_SECRET,AR_AGENT_NAME);
+    await dispatchAgent(room,LK_WS_URL,LK_API_KEY,LK_API_SECRET,AGENT_NAME,'ar_collections');
     await arLkRoom.startAudio();
     await arLkRoom.localParticipant.setMicrophoneEnabled(true);
     arCallState='active'; syncARBtn();
-    showCallModal('INV Collections','Outbound · AR Collections');
-  } catch(err) { dbg('[AR] ERROR: '+(err.message||err)); arCallState='idle'; syncARBtn(); showError(err.message||'AR failed'); }
+    showCallModal('AR Collections — Aria','Outbound · AR Collections');
+    dbg('[AR] Call live — Aria ar_collections persona active');
+  } catch(err) { dbg('[AR] ERROR: '+(err.message||err)); arCallState='idle'; syncARBtn(); showError(err.message||'AR call failed'); }
 }
 
 async function arEndCall() {
