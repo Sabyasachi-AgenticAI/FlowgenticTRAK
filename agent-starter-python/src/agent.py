@@ -383,6 +383,7 @@ async def my_agent(ctx: JobContext):
     logger.info("Room %s → use_case=%s", ctx.room.name, use_case)
 
     session = AgentSession(
+        llm=inference.LLM(model="openai/gpt-4o-mini"),
         stt=inference.STT(model="deepgram/nova-3", language="multi"),
         tts=inference.TTS(
             model="cartesia/sonic-3",
