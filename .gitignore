@@ -26,3 +26,9 @@ Thumbs.db
 # Claude Code
 .claude/settings.local.json
 .claude/worktrees/
+
+.vercel
+
+# Design handoff assets (not needed in deployment)
+html-page-for-aria-now/
+*.zip
