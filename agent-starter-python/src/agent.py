@@ -61,6 +61,9 @@ async def _supa_post(table: str, data: dict) -> list:
 # PERSONA 1 — Load Tender (inbound calls from carriers)
 # ══════════════════════════════════════════════════════════════
 class LoadTenderAgent(Agent):
+    async def on_enter(self) -> None:
+        await self.session.generate_reply()
+
     def __init__(self) -> None:
         super().__init__(
             instructions=textwrap.dedent("""\
@@ -142,6 +145,9 @@ class LoadTenderAgent(Agent):
 # PERSONA 2 — Track & Trace / Carrier Check (outbound)
 # ══════════════════════════════════════════════════════════════
 class CarrierCheckAgent(Agent):
+    async def on_enter(self) -> None:
+        await self.session.generate_reply()
+
     def __init__(self) -> None:
         super().__init__(
             instructions=textwrap.dedent("""\
@@ -226,6 +232,9 @@ class CarrierCheckAgent(Agent):
 # PERSONA 3 — AR Collections (outbound)
 # ══════════════════════════════════════════════════════════════
 class ARCollectionsAgent(Agent):
+    async def on_enter(self) -> None:
+        await self.session.generate_reply()
+
     def __init__(self) -> None:
         super().__init__(
             instructions=textwrap.dedent("""\
