@@ -4,199 +4,571 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Aria Demo Dashboard — Flowgentic × CSA</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js"></script>
 <style>
-*{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%;background:#080A0F;font-family:'Inter',sans-serif;color:#C9D1DC;overflow:hidden}
-::-webkit-scrollbar{width:3px}::-webkit-scrollbar-thumb{background:#1E2A3A;border-radius:2px}
-.app{display:grid;grid-template-rows:48px 1fr;height:100vh}
-.topbar{background:#0D1117;border-bottom:1px solid #1A2332;display:flex;align-items:center;padding:0 16px;gap:0;flex-shrink:0}
-.body{display:grid;grid-template-columns:270px 1fr;overflow:hidden}
-.logo{display:flex;align-items:center;gap:8px;padding-right:16px;border-right:1px solid #1A2332}
-.logo-chip{width:26px;height:26px;border-radius:6px;background:#2D1B69;display:flex;align-items:center;justify-content:center;font-size:13px}
-.logo-text{font-size:13px;font-weight:600;color:#E2E8F0}
-.logo-sub{font-size:11px;color:#3D5170;margin-left:4px}
-.tabs{display:flex;padding-left:8px}
-.tab{display:flex;align-items:center;gap:7px;padding:0 16px;height:48px;background:transparent;border:none;border-bottom:2px solid transparent;cursor:pointer;font-size:11px;color:#3D5170;transition:all .15s;font-family:'Inter',sans-serif}
-.tab.on{color:#E2E8F0;border-bottom-color:#7C3AED}
-.tab-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
-.gap{flex:1}
-.kpis{display:flex;gap:6px}
-.kpi{background:#0D1117;border:1px solid #1A2332;border-radius:5px;padding:5px 12px;text-align:center;min-width:64px}
-.kpi-n{font-size:16px;font-weight:600;color:#E2E8F0;line-height:1}
-.kpi-l{font-size:9px;color:#3D5170;margin-top:2px;letter-spacing:.8px}
-.ctrl{margin-left:14px;display:flex;align-items:center;gap:8px}
+/* ── Design Tokens ───────────────────────────────────────── */
+:root {
+  --amber-50:#FFFBEB;--amber-100:#FEF3C7;--amber-200:#FDE68A;
+  --amber-300:#FCD34D;--amber-400:#FBBF24;--amber-500:#F59E0B;
+  --amber-600:#D97706;--amber-700:#B45309;
+  --slate-50:#F8FAFC;--slate-100:#F1F5F9;--slate-200:#E2E8F0;
+  --slate-300:#CBD5E1;--slate-400:#94A3B8;--slate-500:#64748B;
+  --slate-600:#475569;--slate-700:#334155;--slate-800:#1E293B;
+  --slate-900:#0F172A;--slate-950:#020617;
+  --green-50:#F0FDF4;--green-100:#DCFCE7;--green-500:#16A34A;--green-600:#15803D;
+  --red-50:#FEF2F2;--red-100:#FEE2E2;--red-500:#DC2626;--red-600:#B91C1C;
+  --blue-50:#EFF6FF;--blue-100:#DBEAFE;--blue-500:#2563EB;--blue-600:#1D4ED8;
+  --surface-page:var(--slate-50);--surface-card:#FFFFFF;
+  --surface-sunken:var(--slate-100);--surface-hover:var(--slate-100);
+  --surface-brand-tint:var(--amber-50);
+  --border-subtle:var(--slate-200);--border-strong:var(--slate-300);
+  --text-primary:var(--slate-900);--text-secondary:var(--slate-600);
+  --text-muted:var(--slate-400);--text-brand:var(--amber-700);
+  --brand:var(--amber-500);--brand-hover:var(--amber-600);--on-brand:var(--slate-950);
+  --success-fg:var(--green-600);--success-bg:var(--green-50);--success-solid:var(--green-500);
+  --danger-fg:var(--red-600);--danger-bg:var(--red-50);--danger-solid:var(--red-500);
+  --warning-fg:var(--amber-700);--warning-bg:var(--amber-50);--warning-solid:var(--amber-500);
+  --info-fg:var(--blue-600);--info-bg:var(--blue-50);--info-solid:var(--blue-500);
+  --live-active:var(--green-500);
+  --font-sans:'Plus Jakarta Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --font-mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
+  --text-2xs:11px;--text-xs:12px;--text-sm:13px;--text-base:14px;
+  --text-md:15px;--text-lg:18px;--text-xl:22px;--text-2xl:28px;--text-3xl:36px;
+  --weight-regular:400;--weight-medium:500;--weight-semibold:600;--weight-bold:700;--weight-extra:800;
+  --leading-relaxed:1.65;--tracking-tight:-0.02em;--tracking-eyebrow:0.08em;
+  --space-1:4px;--space-2:8px;--space-3:12px;--space-4:16px;--space-5:20px;
+  --space-6:24px;--space-8:32px;--space-10:40px;--space-12:48px;
+  --radius-xs:4px;--radius-sm:6px;--radius-md:10px;--radius-lg:14px;
+  --radius-xl:20px;--radius-full:9999px;
+  --shadow-xs:0 1px 2px rgba(15,23,42,.05);
+  --shadow-sm:0 1px 3px rgba(15,23,42,.08),0 1px 2px rgba(15,23,42,.04);
+  --shadow-md:0 4px 12px rgba(15,23,42,.08),0 2px 4px rgba(15,23,42,.04);
+  --shadow-lg:0 12px 28px rgba(15,23,42,.12),0 4px 8px rgba(15,23,42,.06);
+  --duration-fast:120ms;--duration-base:180ms;--duration-slow:280ms;
+  --ease-out:cubic-bezier(.16,1,.3,1);
+  --topbar-height:56px;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:var(--font-sans);font-size:var(--text-base);color:var(--text-primary);
+  background:var(--surface-page);-webkit-font-smoothing:antialiased;display:flex;flex-direction:column}
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:2px}
 
-/* ── call button states ── */
-.call-btn{background:#16A34A;color:#fff;border:none;border-radius:6px;padding:7px 18px;font-size:11px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:7px;font-family:'Inter',sans-serif;transition:all .15s;letter-spacing:.3px}
-.call-btn:hover{opacity:.85}
-.call-btn:disabled{opacity:.35;cursor:not-allowed}
-.call-btn.connecting{background:#92400E}
-.call-btn.active{background:#991B1B}
-.call-pill{display:flex;align-items:center;gap:6px;background:#052e16;border:1px solid #166534;border-radius:12px;padding:5px 14px;font-size:10px;color:#4ade80;font-weight:600}
-.rst-btn{background:#0D1117;border:1px solid #1A2332;border-radius:5px;padding:6px 12px;font-size:11px;cursor:pointer;color:#3D5170;font-family:'Inter',sans-serif}
-.rst-btn:hover{color:#8B98A8}
-.sb-badge{font-size:9px;border:1px solid #1A3820;border-radius:3px;padding:2px 7px;font-family:'JetBrains Mono',monospace;margin-left:8px}
-
-/* ── audio bars ── */
+/* ── TOPBAR ──────────────────────────────────────────────── */
+.topbar{height:var(--topbar-height);background:var(--slate-900);border-bottom:1px solid var(--slate-800);
+  display:flex;align-items:center;padding:0 var(--space-6);gap:var(--space-4);flex-shrink:0}
+.topbar-logo{display:flex;align-items:center;gap:var(--space-2);text-decoration:none}
+.logo-mark{width:28px;height:28px;background:#2563EB;border-radius:7px;
+  display:flex;align-items:center;justify-content:center;color:#fff;flex-shrink:0}
+.logo-text{font-size:var(--text-base);font-weight:var(--weight-extra);
+  letter-spacing:var(--tracking-tight);color:#fff}
+.logo-sub{font-size:var(--text-xs);color:var(--slate-500);font-weight:var(--weight-medium)}
+.topbar-divider{width:1px;height:20px;background:var(--slate-700)}
+.topbar-client{font-size:var(--text-sm);font-weight:var(--weight-semibold);color:var(--slate-300)}
+.topbar-spacer{flex:1}
+.status-pill{display:flex;align-items:center;gap:7px;padding:5px 12px;border-radius:var(--radius-full);
+  font-size:var(--text-xs);font-weight:var(--weight-semibold);cursor:default;transition:all var(--duration-base)}
+.status-pill.connecting{background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.25);color:var(--amber-400)}
+.status-pill.live{background:rgba(22,163,74,.12);border:1px solid rgba(22,163,74,.25);color:#4ade80}
+.status-pill.idle{background:rgba(100,116,139,.12);border:1px solid rgba(100,116,139,.2);color:var(--slate-400)}
+.status-dot{width:7px;height:7px;border-radius:var(--radius-full)}
+.connecting .status-dot{background:var(--amber-500);animation:pulseDot 1.4s ease-in-out infinite}
+.live .status-dot{background:#4ade80;animation:pulseDot 1.8s ease-in-out infinite}
+.idle .status-dot{background:var(--slate-500)}
+@keyframes pulseDot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.8)}}
+.btn-call{display:flex;align-items:center;gap:var(--space-2);padding:8px 18px;border-radius:var(--radius-md);
+  font-family:var(--font-sans);font-size:var(--text-sm);font-weight:var(--weight-semibold);
+  color:var(--on-brand);background:var(--brand);border:none;cursor:pointer;
+  transition:background var(--duration-fast),box-shadow var(--duration-fast)}
+.btn-call:hover{background:var(--brand-hover);box-shadow:0 0 16px rgba(245,158,11,.3)}
+.btn-call:disabled{background:var(--slate-700);color:var(--slate-400);cursor:not-allowed;box-shadow:none}
+.btn-call.call-active{background:var(--danger-solid);color:#fff}
+.btn-call.call-active:hover{background:var(--red-600)}
+.btn-call.call-connecting{background:var(--amber-700);color:#fff;cursor:not-allowed}
+.btn-reset{display:flex;align-items:center;gap:var(--space-2);padding:8px 14px;border-radius:var(--radius-md);
+  font-family:var(--font-sans);font-size:var(--text-sm);font-weight:var(--weight-medium);
+  color:var(--slate-400);background:none;border:1px solid var(--slate-700);cursor:pointer;
+  transition:all var(--duration-fast)}
+.btn-reset:hover{border-color:var(--slate-500);color:var(--slate-200)}
 .audio-bars{display:flex;align-items:flex-end;gap:2px;height:16px}
-.audio-bar{width:3px;background:#4ade80;border-radius:1px;animation:none}
+.audio-bar{width:3px;background:#fff;border-radius:1px;height:3px}
 .audio-bar.active{animation:audioBar var(--dur,.4s) ease-in-out infinite alternate}
 @keyframes audioBar{from{height:3px}to{height:14px}}
 
-/* ── feed ── */
-.feed{background:#080A0F;border-right:1px solid #1A2332;display:flex;flex-direction:column;overflow:hidden}
-.feed-hdr{padding:10px 14px;border-bottom:1px solid #1A2332;font-size:9px;color:#3D5170;letter-spacing:2px;font-weight:600;flex-shrink:0}
-.feed-body{flex:1;overflow-y:auto;padding:10px}
-.fc{background:#0D1117;border:1px solid #1A2332;border-radius:8px;padding:10px 12px;margin-bottom:8px;animation:popIn .25s ease}
-.fc.live{border-color:#3D1F80;background:#0F0D1C}
-.fc-row1{display:flex;justify-content:space-between;margin-bottom:5px}
-.fc-title{font-size:11px;font-weight:500;color:#C9D1DC}
-.fc-time{font-size:10px;color:#3D5170;font-family:'JetBrains Mono',monospace}
-.fc-who{font-size:10px;color:#3D5170;margin-bottom:5px}
-.fc-q{font-size:10px;color:#5A6A7A;line-height:1.5;border-left:2px solid #1A2332;padding-left:8px;margin-bottom:7px;font-style:italic}
-.fc-foot{display:flex;justify-content:space-between;align-items:center}
-.fc-tool{font-size:9px;color:#34D399;background:#091810;border:1px solid #1A3820;border-radius:3px;padding:2px 6px;font-family:'JetBrains Mono',monospace}
-.fc-badge{font-size:9px;font-weight:600;padding:2px 7px;border-radius:3px;letter-spacing:.3px}
-.b-auto{background:#091810;color:#34D399}
-.b-live{background:#1A1040;color:#A78BFA}
-.b-esc{background:#2D1800;color:#F59E0B}
+/* ── TABS ────────────────────────────────────────────────── */
+.tabs-bar{background:var(--slate-900);padding:0 var(--space-6);display:flex;gap:2px;
+  border-bottom:1px solid var(--slate-800);flex-shrink:0}
+.tab-btn{display:flex;align-items:center;gap:var(--space-2);padding:12px 18px;
+  font-family:var(--font-sans);font-size:var(--text-sm);font-weight:var(--weight-medium);
+  color:var(--slate-400);background:none;border:none;cursor:pointer;
+  border-bottom:2px solid transparent;margin-bottom:-1px;
+  transition:color var(--duration-fast),border-color var(--duration-fast);white-space:nowrap}
+.tab-btn:hover{color:var(--slate-200)}
+.tab-btn.active{color:var(--amber-400);border-bottom-color:var(--amber-500);font-weight:var(--weight-semibold)}
+.tab-icon{width:15px;height:15px;opacity:.7;flex-shrink:0}
+.tab-btn.active .tab-icon{opacity:1}
 
-/* ── data col ── */
-.dcol{display:flex;flex-direction:column;overflow:hidden}
-.dhdr{padding:10px 16px;border-bottom:1px solid #1A2332;display:flex;justify-content:space-between;align-items:center;flex-shrink:0}
-.dtitle{font-size:12px;font-weight:600;color:#C9D1DC}
-.dsub{font-size:10px;color:#3D5170;margin-top:1px}
-.dbadges{display:flex;gap:6px}
-.db{font-size:9px;font-weight:600;padding:3px 8px;border-radius:3px;letter-spacing:.4px}
-.db-b{background:#0A1830;color:#60A5FA;border:1px solid #1A3060}
-.db-g{background:#091810;color:#34D399;border:1px solid #1A3820}
-.dbody{flex:1;overflow-y:auto}
-table{width:100%;border-collapse:collapse;font-size:11px}
-thead tr{background:#0D1117;border-bottom:1px solid #1A2332}
-th{padding:7px 12px;text-align:left;font-size:9px;font-weight:600;color:#3D5170;letter-spacing:.8px;white-space:nowrap}
-tbody tr{border-bottom:1px solid #0D1117;transition:background .2s}
-tbody tr:hover{background:#0D1117}
-td{padding:9px 12px;color:#6B7A8D;white-space:nowrap}
-.t-ref{font-weight:600;color:#60A5FA;font-family:'JetBrains Mono',monospace;font-size:11px}
-.t-ref.g{color:#34D399}
-.t-str{color:#C9D1DC;font-weight:500}
-.t-mono{font-family:'JetBrains Mono',monospace;font-size:10px}
-.row-new{background:#091810 !important;animation:flash .8s ease}
-.pill{display:inline-flex;align-items:center;gap:4px;font-size:9px;font-weight:600;padding:2px 7px;border-radius:3px}
-.p-act{background:#0A1830;color:#60A5FA}
-.p-new{background:#091810;color:#34D399}
-.p-don{background:#151515;color:#3D5170}
-.aria-lbl{color:#A78BFA;font-weight:600;font-size:10px}
-.bar-foot{padding:9px 16px;border-top:1px solid #1A2332;display:flex;align-items:center;gap:8px;flex-shrink:0}
-.bar-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
-.bar-msg{font-size:11px;font-weight:500}
-.pls{animation:pulse 1.2s ease-in-out infinite}
+/* ── MAIN LAYOUT ─────────────────────────────────────────── */
+.main{flex:1;display:grid;grid-template-columns:1fr 360px;min-height:0;overflow:hidden}
+.left-panel{padding:var(--space-6);overflow-y:auto;display:flex;flex-direction:column;gap:var(--space-5)}
 
-/* ── transcript bubbles ── */
-.tx{border-radius:8px;padding:8px 12px;margin-bottom:8px;animation:popIn .2s ease;border:1px solid}
-.tx.tx-aria{background:#0F0D1C;border-color:#3D1F80}
-.tx.tx-user{background:#080D18;border-color:#1A3060}
-.tx-who{font-size:9px;font-weight:600;letter-spacing:.8px;margin-bottom:4px}
-.tx-aria .tx-who{color:#A78BFA}
-.tx-user .tx-who{color:#60A5FA}
-.tx-text{font-size:11px;color:#C9D1DC;line-height:1.5;font-style:italic}
-.tx-cursor{display:inline-block;width:6px;height:11px;background:#A78BFA;border-radius:1px;margin-left:3px;animation:pulse .8s ease-in-out infinite;vertical-align:middle}
-.tx-user .tx-cursor{background:#60A5FA}
-.tx.tx-done .tx-cursor{display:none}
+/* Metrics */
+.metrics-row{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-4)}
+.metric-card{background:var(--surface-card);border:1px solid var(--border-subtle);
+  border-radius:var(--radius-md);padding:var(--space-5);box-shadow:var(--shadow-xs);
+  position:relative;overflow:hidden}
+.metric-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;
+  background:var(--amber-500);opacity:0;transition:opacity var(--duration-base)}
+.metric-card.highlight::before{opacity:1}
+.metric-eyebrow{font-size:var(--text-xs);font-weight:var(--weight-bold);color:var(--text-muted);
+  letter-spacing:var(--tracking-eyebrow);text-transform:uppercase;margin-bottom:var(--space-1)}
+.metric-desc{font-size:var(--text-xs);color:var(--text-muted);margin-bottom:var(--space-3);line-height:1.4}
+.metric-value{font-family:var(--font-mono);font-size:var(--text-3xl);font-weight:var(--weight-bold);
+  color:var(--text-primary);letter-spacing:-.02em;line-height:1}
+.metric-unit{font-family:var(--font-mono);font-size:var(--text-xl);color:var(--text-muted)}
+.metric-delta{display:inline-flex;align-items:center;gap:3px;font-size:var(--text-xs);
+  font-weight:var(--weight-semibold);margin-top:var(--space-2)}
+.delta-up{color:var(--success-fg)}.delta-down{color:var(--danger-fg)}.delta-flat{color:var(--text-muted)}
+.metric-icon{position:absolute;top:var(--space-4);right:var(--space-4);width:32px;height:32px;
+  border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;
+  background:var(--surface-brand-tint);color:var(--amber-600)}
 
-@keyframes popIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
-@keyframes flash{0%,100%{background:#091810}50%{background:#0d3320}}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+/* Section */
+.section-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-3)}
+.section-title{font-size:var(--text-base);font-weight:var(--weight-semibold);color:var(--text-primary)}
+.section-badge{font-size:var(--text-xs);font-weight:var(--weight-semibold);color:var(--text-muted);
+  background:var(--surface-sunken);border:1px solid var(--border-subtle);
+  border-radius:var(--radius-full);padding:2px 9px}
+
+/* Table */
+.table-card{background:var(--surface-card);border:1px solid var(--border-subtle);
+  border-radius:var(--radius-md);overflow:hidden;box-shadow:var(--shadow-xs)}
+.table-head{display:grid;padding:var(--space-3) var(--space-4);background:var(--surface-sunken);
+  border-bottom:1px solid var(--border-subtle);font-size:var(--text-xs);font-weight:var(--weight-bold);
+  color:var(--text-muted);letter-spacing:var(--tracking-eyebrow);text-transform:uppercase}
+.table-row{display:grid;padding:var(--space-3) var(--space-4);border-bottom:1px solid var(--border-subtle);
+  align-items:center;font-size:var(--text-sm);transition:background var(--duration-fast)}
+.table-row:last-child{border-bottom:none}
+.table-row:hover{background:var(--surface-hover)}
+.lt-cols{grid-template-columns:2fr 1.5fr 1fr 90px 90px}
+.cc-cols{grid-template-columns:1.8fr 1.2fr 1fr 1fr 100px}
+.ar-cols{grid-template-columns:2fr 1fr 1fr 1fr 90px}
+.cell-primary{font-weight:var(--weight-medium);color:var(--text-primary)}
+.cell-mono{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--text-secondary)}
+.cell-muted{color:var(--text-muted)}
+.cell-ref{font-family:var(--font-mono);font-size:var(--text-xs);font-weight:var(--weight-semibold);color:var(--blue-600)}
+.cell-amount{font-family:var(--font-mono);font-size:var(--text-sm);font-weight:var(--weight-semibold);color:var(--text-secondary)}
+.row-highlight{background:rgba(245,158,11,.04)!important;animation:flash .8s ease}
+@keyframes flash{0%,100%{background:rgba(245,158,11,.04)}50%{background:rgba(245,158,11,.1)}}
+
+/* Chips */
+.chip{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:var(--radius-full);
+  font-size:var(--text-2xs);font-weight:var(--weight-semibold);white-space:nowrap}
+.chip-dot{width:5px;height:5px;border-radius:50%}
+.chip-success{background:var(--success-bg);color:var(--success-fg)}.chip-success .chip-dot{background:var(--success-solid)}
+.chip-warning{background:var(--warning-bg);color:var(--warning-fg)}.chip-warning .chip-dot{background:var(--warning-solid)}
+.chip-danger{background:var(--danger-bg);color:var(--danger-fg)}.chip-danger .chip-dot{background:var(--danger-solid)}
+.chip-info{background:var(--info-bg);color:var(--info-fg)}.chip-info .chip-dot{background:var(--info-solid)}
+.chip-neutral{background:var(--surface-sunken);color:var(--text-muted);border:1px solid var(--border-subtle)}
+.chip-neutral .chip-dot{background:var(--slate-400)}
+
+/* Banners */
+.info-banner{background:var(--info-bg);border:1px solid var(--blue-100);border-radius:var(--radius-md);
+  padding:var(--space-3) var(--space-4);display:flex;align-items:center;gap:var(--space-3);
+  font-size:var(--text-sm);color:var(--info-fg)}
+.brand-banner{background:var(--surface-brand-tint);border:1px solid var(--amber-100);border-radius:var(--radius-md);
+  padding:var(--space-3) var(--space-4);display:flex;align-items:center;gap:var(--space-3);
+  font-size:var(--text-sm);color:var(--text-brand)}
+
+/* Live dialer */
+.live-dialer-card{background:var(--slate-900);border:1px solid var(--slate-700);border-radius:var(--radius-lg);
+  display:none;flex-direction:column;position:relative;overflow:hidden}
+.live-dialer-card.visible{display:flex}
+.live-dialer-card::before{content:'';position:absolute;inset:0;
+  background:radial-gradient(ellipse at 80% 50%,rgba(245,158,11,.07) 0%,transparent 70%);pointer-events:none}
+.dialer-top{display:flex;align-items:center;gap:var(--space-4);padding:var(--space-5)}
+.dialer-avatar{width:52px;height:52px;border-radius:var(--radius-full);
+  background:rgba(245,158,11,.15);border:2px solid var(--amber-500);
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;position:relative;
+  font-size:var(--text-xl);font-weight:var(--weight-bold);color:var(--amber-400)}
+.dialer-avatar-ring{position:absolute;inset:-6px;border-radius:var(--radius-full);
+  border:1px solid rgba(245,158,11,.3);animation:ripple 2s ease-out infinite}
+.dialer-info{flex:1;min-width:0}
+.dialer-badge{display:inline-flex;align-items:center;gap:6px;font-size:var(--text-2xs);
+  font-weight:var(--weight-bold);color:var(--amber-400);letter-spacing:var(--tracking-eyebrow);
+  text-transform:uppercase;margin-bottom:var(--space-2)}
+.dialer-badge-dot{width:6px;height:6px;border-radius:50%;background:var(--amber-500);animation:pulseDot 1.2s ease-in-out infinite}
+.dialer-name{font-size:var(--text-md);font-weight:var(--weight-semibold);color:#fff;margin-bottom:3px}
+.dialer-meta{font-size:var(--text-xs);color:var(--slate-400)}
+.dialer-timer{font-family:var(--font-mono);font-size:var(--text-xl);font-weight:var(--weight-bold);
+  color:var(--amber-400);letter-spacing:.05em;flex-shrink:0}
+.dialer-waveform{display:flex;align-items:center;gap:2px;height:24px;flex-shrink:0}
+.dialer-wave-bar{width:3px;border-radius:2px;background:var(--amber-500);animation:wave .9s ease-in-out infinite}
+.dialer-transcript{padding:var(--space-3) var(--space-5);max-height:72px;overflow-y:auto;
+  border-top:1px solid var(--slate-800);display:flex;flex-direction:column;gap:3px}
+.dialer-t-line{font-size:var(--text-xs);line-height:1.5}
+.dialer-t-aria{color:var(--amber-300)}.dialer-t-human{color:var(--slate-300)}
+.dialer-t-label{font-weight:var(--weight-bold);margin-right:4px}
+.dialer-progress-row{display:flex;align-items:center;justify-content:space-between;
+  padding:var(--space-3) var(--space-5);background:rgba(255,255,255,.03);
+  border-top:1px solid var(--slate-800);font-size:var(--text-xs)}
+.dialer-progress-text{color:var(--slate-400)}.dialer-progress-text strong{color:var(--slate-200)}
+.dialer-next-text{color:var(--slate-500)}.dialer-next-text strong{color:var(--amber-400)}
+@keyframes ripple{0%{transform:scale(1);opacity:1}100%{transform:scale(1.2);opacity:0}}
+@keyframes wave{0%,100%{height:4px;opacity:.4}50%{height:20px;opacity:1}}
+
+/* ── RIGHT PANEL ─────────────────────────────────────────── */
+.right-panel{background:var(--surface-card);border-left:1px solid var(--border-subtle);
+  display:flex;flex-direction:column;overflow:hidden}
+.feed-header{padding:var(--space-4) var(--space-5);border-bottom:1px solid var(--border-subtle);
+  display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.feed-title{font-size:var(--text-base);font-weight:var(--weight-semibold);color:var(--text-primary)}
+.feed-count{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--text-muted);
+  background:var(--surface-sunken);border:1px solid var(--border-subtle);
+  border-radius:var(--radius-full);padding:2px 8px}
+.feed-body{flex:1;overflow-y:auto;padding:var(--space-3) var(--space-4);
+  display:flex;flex-direction:column;gap:var(--space-2)}
+.feed-item{background:var(--surface-page);border:1px solid var(--border-subtle);
+  border-radius:var(--radius-md);padding:var(--space-3) var(--space-4);font-size:var(--text-sm);
+  animation:slideIn var(--duration-slow) var(--ease-out)}
+.feed-item.live-item{border-color:rgba(245,158,11,.35);background:var(--amber-50)}
+.feed-item-top{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--space-3);margin-bottom:3px}
+.feed-item-name{font-weight:var(--weight-semibold);color:var(--text-primary)}
+.feed-item-time{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--text-muted);white-space:nowrap;flex-shrink:0}
+.feed-item-who{font-size:var(--text-xs);color:var(--text-muted);margin-bottom:4px}
+.feed-item-quote{font-size:var(--text-xs);color:var(--text-secondary);line-height:var(--leading-relaxed);
+  border-left:2px solid var(--border-subtle);padding-left:var(--space-2);margin-bottom:var(--space-2);font-style:italic}
+.feed-item-foot{display:flex;justify-content:space-between;align-items:center}
+.feed-tool{font-size:var(--text-xs);color:var(--success-fg);background:var(--success-bg);
+  border:1px solid var(--green-100);border-radius:var(--radius-xs);padding:2px 6px;font-family:var(--font-mono)}
+.feed-badge{font-size:var(--text-xs);font-weight:var(--weight-semibold);padding:2px 7px;border-radius:var(--radius-xs)}
+.badge-auto{background:var(--success-bg);color:var(--success-fg)}
+.badge-live{background:var(--surface-brand-tint);color:var(--text-brand)}
+.badge-esc{background:var(--warning-bg);color:var(--warning-fg)}
+.feed-empty{text-align:center;padding:var(--space-8);color:var(--text-muted);font-size:var(--text-sm)}
+
+/* Transcript bubbles */
+.tx-bubble{border-radius:var(--radius-md);padding:var(--space-3) var(--space-4);margin-bottom:var(--space-2);
+  animation:slideIn .2s ease;border:1px solid}
+.tx-bubble.tx-aria{background:var(--surface-brand-tint);border-color:var(--amber-200)}
+.tx-bubble.tx-user{background:var(--info-bg);border-color:var(--blue-100)}
+.tx-who{font-size:var(--text-xs);font-weight:var(--weight-bold);letter-spacing:var(--tracking-eyebrow);
+  margin-bottom:4px;text-transform:uppercase}
+.tx-aria .tx-who{color:var(--amber-700)}.tx-user .tx-who{color:var(--info-fg)}
+.tx-text{font-size:var(--text-sm);color:var(--text-primary);line-height:var(--leading-relaxed);font-style:italic}
+.tx-cursor{display:inline-block;width:6px;height:11px;background:var(--amber-500);border-radius:1px;
+  margin-left:3px;animation:pulseDot .8s ease-in-out infinite;vertical-align:middle}
+.tx-bubble.tx-done .tx-cursor{display:none}
+.tx-user .tx-cursor{background:var(--blue-500)}
+
+/* Call modal */
+.call-overlay{display:none;position:fixed;inset:0;z-index:200;
+  background:rgba(2,6,23,.6);backdrop-filter:blur(4px);align-items:center;justify-content:center}
+.call-overlay.visible{display:flex}
+.call-modal{background:var(--slate-900);border:1px solid var(--slate-700);border-radius:var(--radius-xl);
+  padding:var(--space-8);width:480px;box-shadow:var(--shadow-lg);position:relative}
+.call-modal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-6)}
+.call-modal-title{font-size:var(--text-lg);font-weight:var(--weight-bold);color:#fff}
+.call-close{background:none;border:none;cursor:pointer;color:var(--slate-500);padding:4px;
+  border-radius:var(--radius-sm);transition:color var(--duration-fast)}
+.call-close:hover{color:#fff}
+.call-avatar{width:72px;height:72px;border-radius:var(--radius-full);
+  background:rgba(245,158,11,.15);border:2px solid var(--amber-500);
+  display:flex;align-items:center;justify-content:center;margin:0 auto var(--space-4);position:relative}
+.call-avatar::before{content:'';position:absolute;inset:-8px;border-radius:var(--radius-full);
+  border:1px solid rgba(245,158,11,.2);animation:ripple 2s ease-out infinite}
+.call-avatar::after{content:'';position:absolute;inset:-16px;border-radius:var(--radius-full);
+  border:1px solid rgba(245,158,11,.1);animation:ripple 2s ease-out infinite .5s}
+.call-name{text-align:center;font-size:var(--text-lg);font-weight:var(--weight-semibold);color:#fff;margin-bottom:4px}
+.call-sub{text-align:center;font-size:var(--text-sm);color:var(--slate-400);margin-bottom:var(--space-6)}
+.call-timer{text-align:center;font-family:var(--font-mono);font-size:var(--text-3xl);
+  font-weight:var(--weight-bold);color:var(--amber-400);letter-spacing:.05em;margin-bottom:var(--space-6)}
+.call-waveform{display:flex;align-items:center;justify-content:center;gap:3px;height:32px;margin-bottom:var(--space-6)}
+.wave-bar{width:3px;border-radius:2px;background:var(--amber-500);animation:wave .9s ease-in-out infinite}
+.call-transcript-wrap{background:var(--slate-800);border-radius:var(--radius-md);padding:var(--space-4);
+  margin-bottom:var(--space-6);max-height:120px;overflow-y:auto}
+.modal-tx-line{font-size:var(--text-xs);line-height:1.6;margin-bottom:4px}
+.modal-tx-aria{color:var(--amber-300)}.modal-tx-human{color:var(--slate-300)}
+.modal-tx-label{font-weight:var(--weight-bold);margin-right:5px}
+.modal-tx-cursor{display:inline-block;width:5px;height:10px;background:var(--amber-400);
+  border-radius:1px;margin-left:2px;animation:pulseDot .8s infinite;vertical-align:middle}
+.modal-tx-done .modal-tx-cursor{display:none}
+.btn-end-call{display:flex;align-items:center;justify-content:center;gap:var(--space-2);
+  width:100%;padding:12px;border-radius:var(--radius-md);font-family:var(--font-sans);
+  font-size:var(--text-base);font-weight:var(--weight-semibold);color:#fff;
+  background:var(--danger-solid);border:none;cursor:pointer;
+  transition:background var(--duration-fast)}
+.btn-end-call:hover{background:var(--red-600)}
+
+@keyframes slideIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
 </style>
 </head>
 <body>
-<div class="app">
 
-<!-- TOP BAR -->
-<div class="topbar">
-  <div class="logo">
-    <div class="logo-chip">⚡</div>
-    <span class="logo-text">Aria</span>
-    <span class="logo-sub">by Flowgentic</span>
-  </div>
-  <div class="tabs">
-    <button class="tab" id="t1" onclick="switchTab('lt')">
-      <span class="tab-dot" style="background:#60A5FA"></span>Load Tender
-    </button>
-    <button class="tab on" id="t2" onclick="switchTab('cc')">
-      <span class="tab-dot" style="background:#F59E0B"></span>Outbound Carrier Check
-    </button>
-    <button class="tab" id="t3" onclick="switchTab('ar')">
-      <span class="tab-dot" style="background:#34D399"></span>AR Collections
-    </button>
-  </div>
-  <div class="gap"></div>
-  <div class="kpis" id="kpis-lt" style="display:none">
-    <div class="kpi"><div class="kpi-n" id="k1">12</div><div class="kpi-l">CALLS TODAY</div></div>
-    <div class="kpi"><div class="kpi-n" style="color:#34D399" id="k2">91%</div><div class="kpi-l">CONTAINED</div></div>
-    <div class="kpi"><div class="kpi-n" id="k3">9</div><div class="kpi-l">ACTIONS</div></div>
-  </div>
-  <div class="kpis" id="kpis-cc">
-    <div class="kpi"><div class="kpi-n" id="cc-k1">0</div><div class="kpi-l">CALLS MADE</div></div>
-    <div class="kpi"><div class="kpi-n" style="color:#34D399" id="cc-k2">0</div><div class="kpi-l">CONFIRMED</div></div>
-    <div class="kpi"><div class="kpi-n" style="color:#F59E0B" id="cc-k3">0</div><div class="kpi-l">PENDING</div></div>
-  </div>
-  <div class="kpis" id="kpis-ar" style="display:none">
-    <div class="kpi"><div class="kpi-n" id="ar-k1">0</div><div class="kpi-l">CALLS MADE</div></div>
-    <div class="kpi"><div class="kpi-n" style="color:#60A5FA" id="ar-k2">$0</div><div class="kpi-l">PROMISED</div></div>
-    <div class="kpi"><div class="kpi-n" style="color:#34D399" id="ar-k3">$0</div><div class="kpi-l">COLLECTED</div></div>
-  </div>
-  <span class="sb-badge" id="sb-status" style="color:#3D5170">● CONNECTING</span>
-  <div class="ctrl" id="ctrl">
-    <button class="call-btn" id="call-btn" onclick="activeToggleCall()">
-      <span id="call-icon">📞</span>
-      <span id="call-label">Call Aria</span>
-    </button>
-    <button class="rst-btn" id="reset-btn" onclick="activeResetDemo()" style="display:none">Reset</button>
-  </div>
-</div>
-
-<!-- BODY: Load Tender -->
-<div class="body" id="lt-body" style="display:none">
-  <div class="feed">
-    <div class="feed-hdr">ACTIVITY FEED</div>
-    <div class="feed-body" id="feed"></div>
-  </div>
-  <div class="dcol" id="dcol">
-    <div style="display:flex;align-items:center;justify-content:center;height:100%;color:#3D5170;font-size:12px">
-      Connecting to Supabase…
+<!-- TOPBAR -->
+<header class="topbar">
+  <a class="topbar-logo" href="#">
+    <div class="logo-mark">
+      <svg width="15" height="15" viewBox="0 0 28 28" fill="none">
+        <path d="M16.2 2.5 6.4 15.1c-.5.64-.04 1.57.77 1.57h4.06l-1.6 8.06c-.18.9.97 1.43 1.53.7L21.6 12.4c.5-.65.04-1.58-.77-1.58h-4.2l1.65-7.55c.2-.9-.94-1.46-1.5-.77Z" fill="#fff"/>
+      </svg>
     </div>
+    <span class="logo-text">TRAK</span>
+    <span class="logo-sub">&nbsp;by Flowgentic</span>
+  </a>
+  <div class="topbar-divider"></div>
+  <span class="topbar-client">CSA Demo</span>
+  <div class="topbar-spacer"></div>
+  <div id="statusPill" class="status-pill connecting">
+    <span class="status-dot"></span>
+    <span id="statusText">Connecting…</span>
   </div>
+  <button class="btn-call" id="call-btn" onclick="activeToggleCall()">
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+      <path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h1.38a1.5 1.5 0 0 1 1.429 1.035l.5 1.5a1.5 1.5 0 0 1-.418 1.59l-.558.49a7.518 7.518 0 0 0 3.952 3.952l.49-.558a1.5 1.5 0 0 1 1.59-.418l1.5.5A1.5 1.5 0 0 1 14 11.62V13a1.5 1.5 0 0 1-1.5 1.5C6.201 14.5 1.5 9.799 1.5 3.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+      <path d="M10 2l1.5 1.5L10 5M11.5 3.5H8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <span id="call-label">Call Aria</span>
+  </button>
+  <button class="btn-reset" id="reset-btn" onclick="activeResetDemo()" style="display:none">
+    <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+      <path d="M2 7A5 5 0 1 0 7 2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      <path d="M7 2 5 4.5 7.5 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    Reset
+  </button>
+</header>
+
+<!-- TABS -->
+<div class="tabs-bar">
+  <button class="tab-btn" id="t1" onclick="switchTab('lt')">
+    <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+      <rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M5 7h6M5 10h4"/>
+    </svg>
+    Load Tender
+  </button>
+  <button class="tab-btn active" id="t2" onclick="switchTab('cc')">
+    <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+      <path d="M2 8h3l2-5 3 10 2-5h2"/>
+    </svg>
+    Track &amp; Trace
+  </button>
+  <button class="tab-btn" id="t3" onclick="switchTab('ar')">
+    <svg class="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+      <path d="M8 2v12M5 5h4.5a1.5 1.5 0 0 1 0 3H6a1.5 1.5 0 0 0 0 3H11"/>
+    </svg>
+    AR Collections
+  </button>
 </div>
 
-<!-- BODY: Outbound Carrier Check -->
-<div class="body" id="cc-body">
-  <div class="feed">
-    <div class="feed-hdr">CARRIER CHECK FEED</div>
-    <div class="feed-body" id="cc-feed"></div>
-  </div>
-  <div class="dcol" id="cc-dcol">
-    <div style="display:flex;align-items:center;justify-content:center;height:100%;color:#3D5170;font-size:12px">
-      Loading carrier data…
-    </div>
-  </div>
-</div>
+<!-- MAIN -->
+<div class="main">
 
-<!-- BODY: AR Collections -->
-<div class="body" id="ar-body" style="display:none">
-  <div class="feed">
-    <div class="feed-hdr">AR COLLECTIONS FEED</div>
-    <div class="feed-body" id="ar-feed"></div>
-  </div>
-  <div class="dcol" id="ar-dcol">
-    <div style="display:flex;align-items:center;justify-content:center;height:100%;color:#3D5170;font-size:12px">
-      Loading AR data…
+  <!-- LEFT PANEL -->
+  <div class="left-panel">
+
+    <!-- LOAD TENDER PANEL -->
+    <div id="panel-lt" style="display:none;flex-direction:column;gap:var(--space-5)">
+      <div class="info-banner">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" style="flex-shrink:0"><circle cx="8" cy="8" r="5.5"/><path d="M8 7v4M8 5v.5" stroke-linecap="round"/></svg>
+        <span><strong>Inbound agent.</strong> Carriers call Aria to book load tenders — Aria handles the conversation end-to-end without a human dispatcher.</span>
+      </div>
+      <div class="metrics-row">
+        <div class="metric-card highlight">
+          <div class="metric-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13 3.5A1.5 1.5 0 0 0 11.5 2h-1.38a1.5 1.5 0 0 0-1.429 1.035l-.5 1.5a1.5 1.5 0 0 0 .418 1.59l.558.49a7.518 7.518 0 0 1-3.952 3.952l-.49-.558a1.5 1.5 0 0 0-1.59-.418l-1.5.5A1.5 1.5 0 0 0 1 11.62V13a1.5 1.5 0 0 0 1.5 1.5c6.299 0 11-4.701 11-10.5V3.5Z"/></svg></div>
+          <div class="metric-eyebrow">Calls Today</div>
+          <div class="metric-desc">Inbound calls from carriers booking loads</div>
+          <div class="metric-value" id="k1">12</div>
+          <div class="metric-delta delta-up">↑ 4 more than yesterday</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="5.5"/><path d="M5.5 8l2 2 3-3"/></svg></div>
+          <div class="metric-eyebrow">AI Handle Rate</div>
+          <div class="metric-desc">Calls closed by Aria — no dispatcher needed</div>
+          <div class="metric-value"><span id="k2">91</span><span class="metric-unit">%</span></div>
+          <div class="metric-delta delta-up">↑ 2 points vs last week</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 8h10M9 4l4 4-4 4"/></svg></div>
+          <div class="metric-eyebrow">Actions Taken</div>
+          <div class="metric-desc">Loads booked or actions completed by Aria</div>
+          <div class="metric-value" id="k3">9</div>
+          <div class="metric-delta delta-flat">of 12 calls resulted in a booking</div>
+        </div>
+      </div>
+      <div>
+        <div class="section-hdr">
+          <div class="section-title">Active Loads — Saturn Freight Systems</div>
+          <span class="section-badge" id="lt-count">—</span>
+        </div>
+        <div class="table-card">
+          <div class="table-head lt-cols">
+            <span>Shipper / Ref</span><span>Route</span><span>Service</span><span>Status</span><span>Created By</span>
+          </div>
+          <div id="lt-table-body"><div class="feed-empty">Connecting to Supabase…</div></div>
+        </div>
+      </div>
     </div>
+
+    <!-- TRACK & TRACE PANEL -->
+    <div id="panel-cc" style="display:flex;flex-direction:column;gap:var(--space-5)">
+      <div class="brand-banner">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" style="flex-shrink:0"><path d="M2 8h3l2-5 3 10 2-5h2"/></svg>
+        <span><strong>Outbound auto-dialer.</strong> Aria calls each carrier in sequence, logs status &amp; ETA, then moves to the next — no dispatcher needed.</span>
+      </div>
+      <div class="metrics-row">
+        <div class="metric-card">
+          <div class="metric-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3.5 2A1.5 1.5 0 0 0 2 3.5c0 5.799 4.701 10.5 10.5 10.5A1.5 1.5 0 0 0 14 12.5v-1.38a1.5 1.5 0 0 0-1.035-1.429l-1.5-.5a1.5 1.5 0 0 0-1.59.418l-.49.558a7.518 7.518 0 0 1-3.952-3.952l.558-.49a1.5 1.5 0 0 0 .418-1.59l-.5-1.5A1.5 1.5 0 0 0 4.88 2H3.5Z"/></svg></div>
+          <div class="metric-eyebrow">Calls Made</div>
+          <div class="metric-desc">Check-in calls placed by Aria</div>
+          <div class="metric-value" id="cc-k1">0</div>
+          <div class="metric-delta delta-flat">Press Call Aria to start</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="5.5"/><path d="M5.5 8l2 2 3-3"/></svg></div>
+          <div class="metric-eyebrow">Confirmed</div>
+          <div class="metric-desc">Carriers confirmed location &amp; ETA</div>
+          <div class="metric-value" id="cc-k2">0</div>
+          <div class="metric-delta delta-flat">On track</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3M8 11v.5"/></svg></div>
+          <div class="metric-eyebrow">Pending</div>
+          <div class="metric-desc">Awaiting callback or no answer</div>
+          <div class="metric-value" id="cc-k3">0</div>
+          <div class="metric-delta delta-flat">Flagged for follow-up</div>
+        </div>
+      </div>
+      <!-- Live dialer card (shown during CC auto-dial) -->
+      <div class="live-dialer-card" id="liveDialerCard">
+        <div class="dialer-top">
+          <div class="dialer-avatar"><span id="dialerInitial">A</span><div class="dialer-avatar-ring"></div></div>
+          <div class="dialer-info">
+            <div class="dialer-badge"><span class="dialer-badge-dot"></span>Aria is calling</div>
+            <div class="dialer-name" id="dialerName">—</div>
+            <div class="dialer-meta" id="dialerMeta">—</div>
+          </div>
+          <div class="dialer-waveform">
+            <div class="dialer-wave-bar" style="animation-delay:0s"></div>
+            <div class="dialer-wave-bar" style="animation-delay:.15s"></div>
+            <div class="dialer-wave-bar" style="animation-delay:.3s"></div>
+            <div class="dialer-wave-bar" style="animation-delay:.45s"></div>
+            <div class="dialer-wave-bar" style="animation-delay:.6s"></div>
+          </div>
+          <div class="dialer-timer" id="dialerTimer">0:00</div>
+        </div>
+        <div class="dialer-transcript" id="dialerTranscript"></div>
+        <div class="dialer-progress-row">
+          <span class="dialer-progress-text">Carrier <strong id="dialerCurrent">1</strong> of <strong id="dialerTotal">—</strong></span>
+          <span class="dialer-next-text">Next: <strong id="dialerNext">—</strong></span>
+        </div>
+      </div>
+      <div>
+        <div class="section-hdr">
+          <div class="section-title">Carrier Check Log</div>
+          <span class="section-badge" id="cc-count">—</span>
+        </div>
+        <div class="table-card">
+          <div class="table-head cc-cols">
+            <span>Carrier / Ref</span><span>Route</span><span>Pickup</span><span>Call Status</span><span>Outcome</span>
+          </div>
+          <div id="cc-table-body"><div class="feed-empty">Loading carrier data…</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- AR COLLECTIONS PANEL -->
+    <div id="panel-ar" style="display:none;flex-direction:column;gap:var(--space-5)">
+      <div class="metrics-row">
+        <div class="metric-card">
+          <div class="metric-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3.5 2A1.5 1.5 0 0 0 2 3.5c0 5.799 4.701 10.5 10.5 10.5A1.5 1.5 0 0 0 14 12.5v-1.38a1.5 1.5 0 0 0-1.035-1.429l-1.5-.5a1.5 1.5 0 0 0-1.59.418l-.49.558a7.518 7.518 0 0 1-3.952-3.952l.558-.49a1.5 1.5 0 0 0 .418-1.59l-.5-1.5A1.5 1.5 0 0 0 4.88 2H3.5Z"/></svg></div>
+          <div class="metric-eyebrow">Calls Made</div>
+          <div class="metric-desc">Collection calls placed this session</div>
+          <div class="metric-value" id="ar-k1">0</div>
+          <div class="metric-delta delta-flat">Press Call Aria to start</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 2v12M5 5h4.5a1.5 1.5 0 0 1 0 3H6a1.5 1.5 0 0 0 0 3H11"/></svg></div>
+          <div class="metric-eyebrow">Promise to Pay</div>
+          <div class="metric-desc">Verbal commitments secured by Aria</div>
+          <div class="metric-value"><span class="metric-unit">$</span><span id="ar-k2">0</span></div>
+          <div class="metric-delta delta-flat">Committed</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="5.5"/><path d="M5.5 8l2 2 3-3"/></svg></div>
+          <div class="metric-eyebrow">Collected</div>
+          <div class="metric-desc">Payments confirmed received</div>
+          <div class="metric-value"><span class="metric-unit">$</span><span id="ar-k3">0</span></div>
+          <div class="metric-delta delta-flat">Cash in</div>
+        </div>
+      </div>
+      <div>
+        <div class="section-hdr">
+          <div class="section-title">AR Accounts — Saturn Freight Systems</div>
+          <span class="section-badge" id="ar-count">—</span>
+        </div>
+        <div class="table-card">
+          <div class="table-head ar-cols">
+            <span>Customer / Invoice</span><span>Amount Due</span><span>Days O/D</span><span>Call Status</span><span>Outcome</span>
+          </div>
+          <div id="ar-table-body"><div class="feed-empty">Loading AR data…</div></div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /left-panel -->
+
+  <!-- RIGHT — FEED -->
+  <div class="right-panel">
+    <div class="feed-header">
+      <span class="feed-title" id="feedTitle">Activity Feed</span>
+      <span class="feed-count" id="feedCount">0 events</span>
+    </div>
+    <div class="feed-body" id="feed-lt" style="display:none"></div>
+    <div class="feed-body" id="feed-cc"></div>
+    <div class="feed-body" id="feed-ar" style="display:none"></div>
   </div>
-</div>
+
+</div><!-- /main -->
+
+<!-- CALL MODAL -->
+<div class="call-overlay" id="callOverlay">
+  <div class="call-modal">
+    <div class="call-modal-header">
+      <span class="call-modal-title">Live Call — Aria</span>
+      <button class="call-close" onclick="activeEndCall()">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+      </button>
+    </div>
+    <div class="call-avatar">
+      <svg width="32" height="32" viewBox="0 0 28 28" fill="none">
+        <path d="M16.2 2.5 6.4 15.1c-.5.64-.04 1.57.77 1.57h4.06l-1.6 8.06c-.18.9.97 1.43 1.53.7L21.6 12.4c.5-.65.04-1.58-.77-1.58h-4.2l1.65-7.55c.2-.9-.94-1.46-1.5-.77Z" fill="var(--amber-500)"/>
+      </svg>
+    </div>
+    <div class="call-name" id="callName">Aria</div>
+    <div class="call-sub" id="callSub">Live Call</div>
+    <div class="call-timer" id="callTimer">0:00</div>
+    <div class="call-waveform">
+      <div class="wave-bar" style="animation-delay:0s"></div>
+      <div class="wave-bar" style="animation-delay:.12s"></div>
+      <div class="wave-bar" style="animation-delay:.24s"></div>
+      <div class="wave-bar" style="animation-delay:.36s"></div>
+      <div class="wave-bar" style="animation-delay:.48s"></div>
+      <div class="wave-bar" style="animation-delay:.6s"></div>
+      <div class="wave-bar" style="animation-delay:.72s"></div>
+    </div>
+    <div class="call-transcript-wrap" id="callTranscript"></div>
+    <button class="btn-end-call" onclick="activeEndCall()">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <path d="M14 11.5v-1.38a1.5 1.5 0 0 0-1.035-1.429l-1.5-.5a1.5 1.5 0 0 0-1.59.418l-.35.4C8.11 9.05 7.09 9.05 5.975 8.535l-.1-.05C4.76 7.97 3.97 7.19 3.49 6.475l.41-.36a1.5 1.5 0 0 0 .418-1.59l-.5-1.5A1.5 1.5 0 0 0 2.38 2H1" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+        <path d="M12 4l-4 4M8 4l4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+      End Call
+    </button>
+  </div>
 </div>
 
 <script>
@@ -207,1134 +579,690 @@ const LK_API_KEY    = 'APITdSxhr7LFtFv';
 const LK_API_SECRET = 'plYaMr0rbwVMwUkGFf3wOSq7E9faHFF7vEfW1SpCobVA';
 const LK_WS_URL     = 'wss://flow-crew-wlm418hq.livekit.cloud';
 
-// Room name is unique per session — LiveKit agent auto-dispatches to any room
-function newRoomName() {
-  return 'crew-' + Math.random().toString(36).slice(2, 9);
-}
+function newRoomName() { return 'crew-' + Math.random().toString(36).slice(2,9); }
 
 const { createClient } = supabase;
 const db = createClient(SUPA_URL, SUPA_ANON);
 
 // ── State ────────────────────────────────────────────────────
-let loads      = [];
-let hasNewLoad = false;
-let lkRoom     = null;
-let callState  = 'idle'; // idle | connecting | active
-const activeTranscripts = new Map(); // segmentId → DOM element
+let loads = [], hasNewLoad = false, lkRoom = null, callState = 'idle';
+const activeTranscripts = new Map();
+let activeTab = 'cc';
+let callSeconds = 0, callTimerInt = null;
+const modalTranscripts = new Map();
+
+// ── Chip helpers ─────────────────────────────────────────────
+function chip(label, cls) {
+  return `<span class="chip ${cls}"><span class="chip-dot"></span>${label}</span>`;
+}
+function statusChip(st) {
+  const m = {
+    new:chip('New','chip-success'), act:chip('Active','chip-info'),
+    delivered:chip('Delivered','chip-neutral'),
+    confirmed:chip('Confirmed','chip-success'), pending_check:chip('Pending','chip-warning'),
+    issue_raised:chip('Issue Raised','chip-warning'), rescheduled:chip('Rescheduled','chip-info'),
+    in_progress:chip('In Progress','chip-info'), completed:chip('Completed','chip-neutral'),
+    paid:chip('Collected','chip-success'), payment_promised:chip('Promised','chip-info'),
+    escalated:chip('Escalated','chip-warning'),
+  };
+  return m[st] || chip(st,'chip-neutral');
+}
+function callStatusChip(st) {
+  if (st==='in_progress') return chip('In Progress','chip-warning');
+  if (st==='completed')   return chip('Completed','chip-neutral');
+  return chip('Not Called','chip-neutral');
+}
+
+// ── Feed count tracker ───────────────────────────────────────
+const feedCounts = {lt:0, cc:0, ar:0};
+function incFeed(tab) {
+  feedCounts[tab]++;
+  if (activeTab === tab)
+    document.getElementById('feedCount').textContent = feedCounts[tab] + ' event' + (feedCounts[tab]!==1?'s':'');
+}
 
 // ── Render loads table ───────────────────────────────────────
 function renderLoads() {
-  const newCount = loads.filter(l => l.status === 'new').length;
-  document.getElementById('dcol').innerHTML =
-    `<div class="dhdr">
+  const newCount = loads.filter(l=>l.status==='new').length;
+  document.getElementById('lt-count').textContent = loads.length + ' loads' + (newCount?` · ${newCount} new`:'');
+  const body = document.getElementById('lt-table-body');
+  if (!loads.length) { body.innerHTML='<div class="feed-empty">No loads found.</div>'; return; }
+  body.innerHTML = loads.map(l => `
+    <div class="table-row lt-cols${l.status==='new'?' row-highlight':''}">
       <div>
-        <div class="dtitle">Dispatch-Trak — Active Loads</div>
-        <div class="dsub">Saturn Freight Systems · All Modes</div>
+        <div class="cell-primary">${l.shipper}</div>
+        <div class="cell-ref">${l.ref}</div>
       </div>
-      <div class="dbadges">
-        <span class="db db-b">${loads.length} LOADS</span>
-        ${newCount ? `<span class="db db-g">${newCount} NEW</span>` : ''}
-      </div>
-    </div>
-    <div class="dbody">
-      <table>
-        <thead><tr>
-          <th>REF #</th><th>SHIPPER</th><th>ROUTE</th><th>SERVICE</th>
-          <th>WEIGHT</th><th>STATUS</th><th>CARRIER</th><th>ETA</th><th>CREATED BY</th>
-        </tr></thead>
-        <tbody>
-          ${loads.map(l => `
-            <tr class="${l.status==='new'?'row-new':''}">
-              <td class="t-ref ${l.status==='new'?'g':''}">${l.ref}</td>
-              <td class="t-str" style="max-width:130px;overflow:hidden;text-overflow:ellipsis">${l.shipper}</td>
-              <td class="t-mono t-str">${l.route}</td>
-              <td>${l.service}</td>
-              <td>${l.weight}</td>
-              <td>${statusPill(l.status)}</td>
-              <td>${l.carrier}</td>
-              <td class="t-mono">${l.eta}</td>
-              <td>${l.created_by==='aria'
-                ? '<span class="aria-lbl">⚡ Aria AI</span>'
-                : `<span style="color:#3D5170">${l.created_by}</span>`}</td>
-            </tr>`).join('')}
-        </tbody>
-      </table>
-    </div>
-    ${hasNewLoad ? `
-      <div class="bar-foot">
-        <span class="bar-dot pls" style="background:#34D399"></span>
-        <span class="bar-msg" style="color:#34D399">New load created by Aria — dashboard updated live</span>
-      </div>` : ''}`;
+      <div class="cell-muted" style="font-size:var(--text-xs)">${l.route}</div>
+      <div class="cell-muted">${l.service}</div>
+      <div>${statusChip(l.status)}</div>
+      <div>${l.created_by==='aria'
+        ? '<span style="font-size:var(--text-xs);font-weight:var(--weight-semibold);color:var(--amber-700)">⚡ Aria AI</span>'
+        : `<span class="cell-muted">${l.created_by}</span>`}</div>
+    </div>`).join('');
 }
 
-function statusPill(st) {
-  if (st === 'new') return '<span class="pill p-new">NEW ✦</span>';
-  if (st === 'act') return '<span class="pill p-act">Active</span>';
-  return '<span class="pill p-don">Delivered</span>';
-}
-
-// ── Render feed card ─────────────────────────────────────────
-function renderFeedCard(row, prepend) {
-  const f   = document.getElementById('feed');
-  const who = row.who === 'aria' ? 'Aria AI · Saturn Freight'
-            : row.who === 'cal'  ? 'Caller · Saturn Freight'
-            : 'System · Saturn Freight';
-  const d   = document.createElement('div');
-  d.className = 'fc' + (row.who === 'aria' ? ' live' : '');
-  d.innerHTML =
-    `<div class="fc-row1">
-      <span class="fc-title">${row.title}</span>
-      <span class="fc-time">${row.time_str}</span>
+// ── Feed card ────────────────────────────────────────────────
+function renderFeedCard(row, feedId, prepend) {
+  const feedEl = document.getElementById(feedId);
+  const who = row.who==='aria'    ? 'Aria AI · Saturn Freight'
+             : row.who==='cal'    ? 'Caller · Saturn Freight'
+             : row.who==='carrier'? 'Carrier · Inbound'
+             : row.who==='customer'?'Customer · Inbound'
+             : 'System · Saturn Freight';
+  const isLive = row.who==='aria';
+  const badgeCls = row.badge_type==='auto'?'badge-auto':row.badge_type==='esc'?'badge-esc':'badge-live';
+  const badgeLabel = row.badge_type==='auto'?'Automated':row.badge_type==='esc'?'Escalated':'Live';
+  const d = document.createElement('div');
+  d.className = 'feed-item' + (isLive?' live-item':'');
+  d.innerHTML = `
+    <div class="feed-item-top">
+      <span class="feed-item-name">${row.title}</span>
+      <span class="feed-item-time">${row.time_str}</span>
     </div>
-    <div class="fc-who">${who}</div>
-    <div class="fc-q">"${row.quote.substring(0,90)}${row.quote.length>90?'…':''}"</div>
-    <div class="fc-foot">
-      ${row.tool ? `<span class="fc-tool">${row.tool}</span>` : '<span></span>'}
-      <span class="fc-badge b-${row.badge_type}">${
-        row.badge_type==='auto' ? 'Automated' :
-        row.badge_type==='esc'  ? 'Escalated' : 'Live'}</span>
+    <div class="feed-item-who">${who}</div>
+    <div class="feed-item-quote">"${row.quote.substring(0,90)}${row.quote.length>90?'…':''}"</div>
+    <div class="feed-item-foot">
+      ${row.tool?`<span class="feed-tool">${row.tool}</span>`:'<span></span>'}
+      <span class="feed-badge ${badgeCls}">${badgeLabel}</span>
     </div>`;
-  if (prepend) f.insertBefore(d, f.firstChild);
-  else f.appendChild(d);
+  const empty = feedEl.querySelector('.feed-empty');
+  if (empty) empty.remove();
+  if (prepend) feedEl.insertBefore(d, feedEl.firstChild);
+  else feedEl.appendChild(d);
+}
+
+// ── Transcript bubbles ────────────────────────────────────────
+function updateTranscriptEl(segId, text, isAgent, isFinal, feedId) {
+  if (!text||!text.trim()) return;
+  const cls = isAgent?'tx-aria':'tx-user';
+  const label = isAgent?'⚡ ARIA':'👤 YOU';
+  let el = activeTranscripts.get(segId);
+  if (!el) {
+    el = document.createElement('div');
+    el.className = `tx-bubble ${cls}`;
+    el.innerHTML = `<div class="tx-who">${label}</div><span class="tx-text"></span><span class="tx-cursor"></span>`;
+    const feed = document.getElementById(feedId);
+    feed.insertBefore(el, feed.firstChild);
+    activeTranscripts.set(segId, el);
+  }
+  el.querySelector('.tx-text').textContent = text;
+  if (isFinal) { el.classList.add('tx-done'); activeTranscripts.delete(segId); }
+
+  // Mirror to call modal if open
+  updateModalTranscript(segId, text, isAgent, isFinal);
+}
+
+function updateModalTranscript(segId, text, isAgent, isFinal) {
+  const wrap = document.getElementById('callTranscript');
+  const cls = isAgent?'modal-tx-aria':'modal-tx-human';
+  const label = isAgent?'⚡ Aria':'👤 You';
+  let el = modalTranscripts.get(segId);
+  if (!el) {
+    el = document.createElement('div');
+    el.className = `modal-tx-line ${cls}`;
+    el.innerHTML = `<span class="modal-tx-label">${label}:</span><span class="modal-tx-text"></span><span class="modal-tx-cursor"></span>`;
+    wrap.insertBefore(el, wrap.firstChild);
+    modalTranscripts.set(segId, el);
+  }
+  el.querySelector('.modal-tx-text').textContent = text;
+  if (isFinal) { el.classList.add('modal-tx-done'); modalTranscripts.delete(segId); wrap.scrollTop=0; }
 }
 
 // ── Load initial data ─────────────────────────────────────────
 async function loadData() {
   const [lr, fr] = await Promise.all([
-    db.from('demo_loads').select('*').order('created_at', {ascending: true}),
-    db.from('demo_feed').select('*').order('created_at', {ascending: false})
+    db.from('demo_loads').select('*').order('created_at',{ascending:true}),
+    db.from('demo_feed').select('*').order('created_at',{ascending:false})
   ]);
-  if (lr.error || fr.error) { console.error(lr.error || fr.error); return; }
-  loads      = lr.data;
-  hasNewLoad = loads.some(l => l.status === 'new');
+  if (lr.error||fr.error) { console.error(lr.error||fr.error); return; }
+  loads = lr.data; hasNewLoad = loads.some(l=>l.status==='new');
   renderLoads();
-  document.getElementById('feed').innerHTML = '';
-  fr.data.forEach(r => renderFeedCard(r, false));
+  document.getElementById('feed-lt').innerHTML = '';
+  feedCounts.lt = 0;
+  fr.data.forEach(r => { renderFeedCard(r,'feed-lt',false); feedCounts.lt++; });
+  if (activeTab==='lt') document.getElementById('feedCount').textContent = feedCounts.lt+' events';
 }
 
 // ── Supabase Realtime ─────────────────────────────────────────
 function subscribeRealtime() {
   db.channel('demo-loads')
-    .on('postgres_changes', {event:'INSERT', schema:'public', table:'demo_loads'}, p => {
-      loads.unshift(p.new);
-      hasNewLoad = true;
-      renderLoads();
-      document.getElementById('k1').textContent =
-        parseInt(document.getElementById('k1').textContent) + 1;
-      document.getElementById('k3').textContent =
-        parseInt(document.getElementById('k3').textContent) + 1;
+    .on('postgres_changes',{event:'INSERT',schema:'public',table:'demo_loads'}, p => {
+      loads.unshift(p.new); hasNewLoad=true; renderLoads();
+      document.getElementById('k1').textContent = parseInt(document.getElementById('k1').textContent)+1;
+      document.getElementById('k3').textContent = parseInt(document.getElementById('k3').textContent)+1;
     })
-    .on('postgres_changes', {event:'DELETE', schema:'public', table:'demo_loads'}, p => {
-      loads = loads.filter(l => l.ref !== p.old.ref);
-      hasNewLoad = loads.some(l => l.status === 'new');
-      renderLoads();
+    .on('postgres_changes',{event:'DELETE',schema:'public',table:'demo_loads'}, p => {
+      loads = loads.filter(l=>l.ref!==p.old.ref);
+      hasNewLoad = loads.some(l=>l.status==='new'); renderLoads();
     })
     .subscribe(status => {
-      const badge = document.getElementById('sb-status');
-      if (status === 'SUBSCRIBED') {
-        badge.textContent  = '● LIVE';
-        badge.style.color  = '#34D399';
-        badge.style.borderColor = '#1A3820';
+      const pill = document.getElementById('statusPill');
+      const txt  = document.getElementById('statusText');
+      if (status==='SUBSCRIBED') {
+        pill.className='status-pill live'; txt.textContent='Live';
       }
     });
 
   db.channel('demo-feed')
-    .on('postgres_changes', {event:'INSERT', schema:'public', table:'demo_feed'}, p => {
-      renderFeedCard(p.new, true);
+    .on('postgres_changes',{event:'INSERT',schema:'public',table:'demo_feed'}, p => {
+      renderFeedCard(p.new,'feed-lt',true); incFeed('lt');
     })
-    .on('postgres_changes', {event:'DELETE', schema:'public', table:'demo_feed'}, () => {
-      loadData();
-    })
+    .on('postgres_changes',{event:'DELETE',schema:'public',table:'demo_feed'}, () => loadData())
     .subscribe();
-}
-
-// ── Transcription ─────────────────────────────────────────────
-// Used by both text-stream path (primary) and TranscriptionReceived fallback
-function updateTranscriptEl(segId, text, isAgent, isFinal) {
-  if (!text || !text.trim()) return;
-  const cls   = isAgent ? 'tx-aria' : 'tx-user';
-  const label = isAgent ? '⚡ ARIA' : '👤 YOU';
-
-  let el = activeTranscripts.get(segId);
-  if (!el) {
-    el = document.createElement('div');
-    el.className = `tx ${cls}`;
-    el.innerHTML =
-      `<div class="tx-who">${label}</div>` +
-      `<span class="tx-text"></span>` +
-      `<span class="tx-cursor"></span>`;
-    const feed = document.getElementById('feed');
-    feed.insertBefore(el, feed.firstChild);
-    activeTranscripts.set(segId, el);
-  }
-
-  el.querySelector('.tx-text').textContent = text;
-  if (isFinal) {
-    el.classList.add('tx-done');
-    activeTranscripts.delete(segId);
-  }
-}
-
-// ── LiveKit call ─────────────────────────────────────────────
-async function toggleCall() {
-  if (callState === 'idle')   { await startCall(); return; }
-  if (callState === 'active') { await endCall();   return; }
 }
 
 // ── JWT helpers ──────────────────────────────────────────────
 function b64url(str) {
-  return btoa(unescape(encodeURIComponent(str)))
-    .replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+  return btoa(unescape(encodeURIComponent(str))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
 }
 function b64urlBuf(buf) {
-  const b = new Uint8Array(buf);
-  let s = '';
-  for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
+  const b=new Uint8Array(buf); let s='';
+  for(let i=0;i<b.length;i++) s+=String.fromCharCode(b[i]);
   return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
 }
-async function signJWT(payload) {
-  const hdr = b64url(JSON.stringify({alg:'HS256',typ:'JWT'}));
-  const pay = b64url(JSON.stringify(payload));
-  const inp = `${hdr}.${pay}`;
-  const enc = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    'raw', enc.encode(LK_API_SECRET), {name:'HMAC',hash:'SHA-256'}, false, ['sign']
-  );
-  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(inp));
+async function signJWT(payload, secret) {
+  const hdr=b64url(JSON.stringify({alg:'HS256',typ:'JWT'}));
+  const pay=b64url(JSON.stringify(payload));
+  const inp=`${hdr}.${pay}`;
+  const enc=new TextEncoder();
+  const key=await crypto.subtle.importKey('raw',enc.encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);
+  const sig=await crypto.subtle.sign('HMAC',key,enc.encode(inp));
   return `${inp}.${b64urlBuf(sig)}`;
 }
-
-// Participant token — joins the room
-async function makeParticipantToken(room) {
-  const now = Math.floor(Date.now() / 1000);
-  return signJWT({
-    iss: LK_API_KEY, exp: now + 3600, nbf: now,
-    jti: `user-${Date.now()}`,
-    video: { room, roomJoin: true, canPublish: true, canSubscribe: true, canPublishData: true },
-    name: 'CSA Demo Viewer', metadata: ''
-  });
+async function makeParticipantToken(room,apiKey,apiSecret) {
+  const now=Math.floor(Date.now()/1000);
+  return signJWT({iss:apiKey,exp:now+3600,nbf:now,jti:`user-${Date.now()}`,
+    video:{room,roomJoin:true,canPublish:true,canSubscribe:true,canPublishData:true},
+    name:'CSA Demo Viewer',metadata:''},apiSecret);
 }
-
-// Admin token scoped to a specific room for agent dispatch
-async function makeAdminToken(room) {
-  const now = Math.floor(Date.now() / 1000);
-  return signJWT({
-    iss: LK_API_KEY, exp: now + 300, nbf: now,
-    video: { room, roomCreate: true, roomAdmin: true }
-  });
+async function makeAdminToken(room,apiKey,apiSecret) {
+  const now=Math.floor(Date.now()/1000);
+  return signJWT({iss:apiKey,exp:now+300,nbf:now,video:{room,roomCreate:true,roomAdmin:true}},apiSecret);
 }
-
-// Explicitly dispatch my-agent to the room via LiveKit AgentDispatch API
-async function dispatchAgent(room) {
+async function dispatchAgent(room,wsUrl,apiKey,apiSecret,agentName) {
   try {
-    const adminToken = await makeAdminToken(room);
-    const lkHttpUrl  = LK_WS_URL.replace('wss://', 'https://');
-    const res = await fetch(
-      `${lkHttpUrl}/twirp/livekit.AgentDispatchService/CreateDispatch`,
-      {
-        method:  'POST',
-        headers: { 'Authorization': 'Bearer ' + adminToken, 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ room, agentName: 'my-agent' })
-      }
-    );
-    const text = await res.text();
-    if (!res.ok) { dbg('Dispatch API error ' + res.status + ': ' + text); return; }
-    dbg('Step 4c ✓ Dispatch OK — my-agent inbound');
-  } catch (e) {
-    dbg('Dispatch fetch failed: ' + e.message);
-  }
+    const tok=await makeAdminToken(room,apiKey,apiSecret);
+    const httpUrl=wsUrl.replace('wss://','https://');
+    const res=await fetch(`${httpUrl}/twirp/livekit.AgentDispatchService/CreateDispatch`,
+      {method:'POST',headers:{'Authorization':'Bearer '+tok,'Content-Type':'application/json'},
+       body:JSON.stringify({room,agentName})});
+    if (!res.ok) dbg('Dispatch error '+res.status);
+    else dbg('Dispatch OK — '+agentName+' inbound');
+  } catch(e) { dbg('Dispatch failed: '+e.message); }
 }
 
-async function startCall() {
-  setCallState('connecting');
-  showError('');
-  dbg('Starting call…');
-  try {
-    // Step 1 — SDK check
-    dbg('Step 1: Checking LiveKit SDK…');
-    if (typeof LivekitClient === 'undefined') throw new Error('LiveKit SDK not loaded. Check network.');
-    dbg('Step 1 ✓ SDK loaded (v' + (LivekitClient.version||'?') + ')');
-
-    // Step 2 — Token
-    dbg('Step 2: Generating token…');
-    const room  = newRoomName();
-    const token = await makeParticipantToken(room);
-    dbg('Step 2 ✓ Token ready · room: ' + room);
-
-    // Step 3 — Room object
-    dbg('Step 3: Creating room object…');
-    lkRoom = new LivekitClient.Room({ adaptiveStream: true, dynacast: true });
-
-    lkRoom.on(LivekitClient.RoomEvent.Disconnected, () => {
-      dbg('Disconnected.');
-      setCallState('idle');
-    });
-
-    // Play audio from every remote participant (the agent)
-    lkRoom.on(LivekitClient.RoomEvent.TrackSubscribed, (track, _pub, participant) => {
-      dbg('Track from ' + participant.identity + ' (' + track.kind + ')');
-      if (track.kind === LivekitClient.Track.Kind.Audio) {
-        const el = track.attach();
-        el.dataset.lkParticipant = participant.sid;
-        document.body.appendChild(el);
-        dbg('Agent audio attached — you should hear Aria');
-      }
-    });
-
-    lkRoom.on(LivekitClient.RoomEvent.TrackUnsubscribed, (track) => {
-      track.detach().forEach(el => el.remove());
-    });
-
-    // Animate bars when anyone (agent) is speaking
-    lkRoom.on(LivekitClient.RoomEvent.ActiveSpeakersChanged, spk => {
-      const agentSpeaking = spk.some(p => p !== lkRoom.localParticipant);
-      updateAudioBars(agentSpeaking);
-    });
-
-    lkRoom.on(LivekitClient.RoomEvent.ParticipantConnected, p => {
-      dbg('Participant joined: ' + p.identity);
-    });
-
-    dbg('Step 3 ✓ Room object created');
-
-    // Step 4 — Connect
-    dbg('Step 4: Connecting to ' + LK_WS_URL + '…');
-    await lkRoom.connect(LK_WS_URL, token);
-    dbg('Step 4 ✓ Connected — room: ' + room);
-
-    // Step 4b — Log ALL room events to debug what the agent is sending
-    const _origEmit = lkRoom.emit.bind(lkRoom);
-    lkRoom.emit = function(event, ...args) {
-      if (!['activeSpeakersChanged','audioPlaybackStatusChanged'].includes(event)) {
-        dbg('EVENT: ' + event + (args[0] ? ' [' + (typeof args[0]) + ']' : ''));
-      }
-      return _origEmit(event, ...args);
-    };
-
-    dbg('Step 4b ✓ Event spy registered (text streams are primary path)');
-
-    // Text stream handler (newer SDK path — primary for LiveKit Agent Builder)
-    if (typeof lkRoom.registerTextStreamHandler === 'function') {
-      lkRoom.registerTextStreamHandler('lk.transcription', async (reader, participantInfo) => {
-        const attrs   = (reader.info && reader.info.attributes) ? reader.info.attributes : {};
-        const segId   = attrs['lk.segment_id'];
-        const isFinal = attrs['lk.transcription_final'] !== 'false'; // missing = treat as final
-        const isAgent = participantInfo.identity !== lkRoom.localParticipant.identity;
-        dbg('TX from=' + participantInfo.identity + ' segId=' + segId + ' final=' + isFinal + ' attrs=' + JSON.stringify(attrs));
-
-        // If no stable segment_id, skip interim to avoid duplicate bubbles
-        if (!segId && !isFinal) { dbg('TX skipping interim (no segId)'); return; }
-
-        const stableId = segId || ('ts-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6));
-        try {
-          const text = await reader.readAll();
-          updateTranscriptEl(stableId, text, isAgent, isFinal);
-        } catch(e) { dbg('TextStream error: ' + e.message); }
-      });
-
-      lkRoom.registerTextStreamHandler('lk.chat', async (reader, participantInfo) => {
-        const isAgent = participantInfo.identity !== lkRoom.localParticipant.identity;
-        const segId   = 'chat-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
-        dbg('TextStream lk.chat from=' + participantInfo.identity);
-        try {
-          const text = await reader.readAll();
-          updateTranscriptEl(segId, text, isAgent, true);
-        } catch(e) { dbg('TextStream error: ' + e.message); }
-      });
-
-      dbg('Step 4b+ ✓ Text stream handlers registered (lk.transcription + lk.chat)');
-    }
-
-    dbg('Step 4c: Dispatching my-agent…');
-    await dispatchAgent(room);
-
-    // Step 5 — Unlock audio (must be in user-gesture context)
-    dbg('Step 5: Unlocking browser audio…');
-    await lkRoom.startAudio();
-    dbg('Step 5 ✓ Audio unlocked');
-
-    // Step 6 — Mic
-    dbg('Step 6: Enabling microphone…');
-    await lkRoom.localParticipant.setMicrophoneEnabled(true);
-    dbg('Step 6 ✓ Microphone live — dispatching my-agent…');
-
-    setCallState('active');
-    dbg('Call live — speak to Aria');
-  } catch (err) {
-    console.error('[LiveKit]', err);
-    dbg('✗ ERROR: ' + (err.message || err));
-    setCallState('idle');
-    showError(err.message || 'Connection failed — see debug panel');
+// ── Call state management ─────────────────────────────────────
+function setTopbarCallState(state, label) {
+  const btn  = document.getElementById('call-btn');
+  const lbl  = document.getElementById('call-label');
+  const pill = document.getElementById('statusPill');
+  const txt  = document.getElementById('statusText');
+  const rst  = document.getElementById('reset-btn');
+  btn.className = 'btn-call' + (state==='active'?' call-active':state==='connecting'?' call-connecting':'');
+  btn.disabled  = state==='connecting';
+  lbl.textContent = label || (state==='active'?'End Call':state==='connecting'?'Connecting…':'Call Aria');
+  if (state==='active') { pill.className='status-pill live'; txt.textContent='Live'; }
+  else if (state==='idle') {
+    const anyActive = hasNewLoad||ccHasCallMade||arHasCallMade;
+    rst.style.display = anyActive?'flex':'none';
+    setTimeout(()=>{ pill.className='status-pill connecting'; txt.textContent='Ready'; },800);
   }
-}
-
-function dbg(msg) {
-  console.log('[LiveKit]', msg);
-  let panel = document.getElementById('dbg-panel');
-  if (!panel) {
-    panel = document.createElement('div');
-    panel.id = 'dbg-panel';
-    panel.style.cssText = [
-      'position:fixed','bottom:16px','right:16px','width:360px',
-      'background:#0D1117','border:1px solid #1A2332','border-radius:8px',
-      'padding:10px 12px','font-family:JetBrains Mono,monospace','font-size:10px',
-      'color:#8B98A8','z-index:9999','max-height:200px','overflow-y:auto'
-    ].join(';');
-    panel.innerHTML = '<div style="color:#3D5170;font-size:9px;letter-spacing:1px;margin-bottom:6px">CALL DEBUG</div>';
-    document.body.appendChild(panel);
-  }
-  const row = document.createElement('div');
-  row.style.cssText = 'padding:2px 0;border-top:1px solid #1A2332';
-  row.textContent = msg;
-  if (msg.includes('✓')) row.style.color = '#34D399';
-  if (msg.includes('✗') || msg.includes('ERROR')) row.style.color = '#F87171';
-  panel.appendChild(row);
-  panel.scrollTop = panel.scrollHeight;
-}
-
-function showError(msg) {
-  let el = document.getElementById('call-error');
-  if (!el) {
-    el = document.createElement('div');
-    el.id = 'call-error';
-    el.style.cssText = 'position:fixed;bottom:16px;right:16px;background:#2A0D0D;color:#F87171;border:1px solid #4A1A1A;border-radius:6px;padding:10px 14px;font-size:11px;max-width:320px;z-index:999;display:none';
-    document.body.appendChild(el);
-  }
-  if (msg) { el.textContent = '⚠ ' + msg; el.style.display = 'block'; }
-  else      { el.style.display = 'none'; }
-}
-
-async function endCall() {
-  if (lkRoom) {
-    await lkRoom.disconnect();
-    lkRoom = null;
-  }
-  document.querySelectorAll('audio[data-lk-participant]').forEach(el => el.remove());
-  activeTranscripts.forEach(el => el.classList.add('tx-done'));
-  activeTranscripts.clear();
-  setCallState('idle');
-}
-
-function setCallState(state) {
-  callState = state;
-  const btn   = document.getElementById('call-btn');
-  const icon  = document.getElementById('call-icon');
-  const label = document.getElementById('call-label');
-  const rst   = document.getElementById('reset-btn');
-
-  if (state === 'idle') {
-    btn.className      = 'call-btn';
-    btn.disabled       = false;
-    icon.textContent   = '📞';
-    label.textContent  = 'Call Aria';
-    rst.style.display  = hasNewLoad ? 'block' : 'none';
-    updateAudioBars(false);
-  } else if (state === 'connecting') {
-    btn.className      = 'call-btn connecting';
-    btn.disabled       = true;
-    icon.textContent   = '⏳';
-    label.textContent  = 'Connecting…';
-    rst.style.display  = 'none';
-  } else if (state === 'active') {
-    btn.className      = 'call-btn active';
-    btn.disabled       = false;
-    icon.innerHTML     = `<div class="audio-bars" id="audio-bars">
-      ${[.35,.55,.7,.45,.6].map((d,i) =>
-        `<div class="audio-bar" style="--dur:${d}s;height:3px" id="ab${i}"></div>`
-      ).join('')}
-    </div>`;
-    label.textContent  = 'End Call';
-    rst.style.display  = 'none';
-  }
+  updateAudioBars(false);
 }
 
 function updateAudioBars(active) {
-  document.querySelectorAll('.audio-bar').forEach(b => {
-    b.classList.toggle('active', active);
-  });
+  document.querySelectorAll('.audio-bar').forEach(b=>b.classList.toggle('active',active));
+}
+
+// ── LT LiveKit call ──────────────────────────────────────────
+async function toggleCall() {
+  if (callState==='idle')   { await startCall(); return; }
+  if (callState==='active') { await endCall();   return; }
+}
+
+async function startCall() {
+  callState='connecting'; setTopbarCallState('connecting');
+  showError(''); dbg('Starting LT call…');
+  try {
+    if (typeof LivekitClient==='undefined') throw new Error('LiveKit SDK not loaded.');
+    const room=newRoomName();
+    const token=await makeParticipantToken(room,LK_API_KEY,LK_API_SECRET);
+    dbg('Token ready · room: '+room);
+    lkRoom=new LivekitClient.Room({adaptiveStream:true,dynacast:true});
+    lkRoom.on(LivekitClient.RoomEvent.Disconnected,()=>{ callState='idle'; setTopbarCallState('idle'); hideCallModal(); });
+    lkRoom.on(LivekitClient.RoomEvent.TrackSubscribed,(track,_pub,participant)=>{
+      if (track.kind===LivekitClient.Track.Kind.Audio) {
+        const el=track.attach(); el.dataset.lkParticipant=participant.sid; document.body.appendChild(el);
+        dbg('Agent audio attached');
+      }
+    });
+    lkRoom.on(LivekitClient.RoomEvent.TrackUnsubscribed,track=>track.detach().forEach(el=>el.remove()));
+    lkRoom.on(LivekitClient.RoomEvent.ActiveSpeakersChanged,spk=>{
+      if (activeTab==='lt') updateAudioBars(spk.some(p=>p!==lkRoom.localParticipant));
+    });
+    await lkRoom.connect(LK_WS_URL,token); dbg('Connected');
+    if (typeof lkRoom.registerTextStreamHandler==='function') {
+      lkRoom.registerTextStreamHandler('lk.transcription',async(reader,pInfo)=>{
+        const attrs=(reader.info&&reader.info.attributes)||{};
+        const segId=attrs['lk.segment_id'];
+        const isFinal=attrs['lk.transcription_final']!=='false';
+        const isAgent=pInfo.identity!==lkRoom.localParticipant.identity;
+        if (!segId&&!isFinal) return;
+        const id=segId||('ts-'+Date.now());
+        try { const text=await reader.readAll(); updateTranscriptEl(id,text,isAgent,isFinal,'feed-lt'); } catch(e){}
+      });
+      lkRoom.registerTextStreamHandler('lk.chat',async(reader,pInfo)=>{
+        const isAgent=pInfo.identity!==lkRoom.localParticipant.identity;
+        const id='chat-'+Date.now();
+        try { const text=await reader.readAll(); updateTranscriptEl(id,text,isAgent,true,'feed-lt'); } catch(e){}
+      });
+    }
+    await dispatchAgent(room,LK_WS_URL,LK_API_KEY,LK_API_SECRET,'my-agent');
+    await lkRoom.startAudio();
+    await lkRoom.localParticipant.setMicrophoneEnabled(true);
+    callState='active'; setTopbarCallState('active');
+    showCallModal('Incoming — Carrier on the line','Inbound · Load Tender');
+    dbg('Call live — speak to Aria');
+  } catch(err) {
+    dbg('✗ ERROR: '+(err.message||err)); callState='idle'; setTopbarCallState('idle');
+    showError(err.message||'Connection failed');
+  }
+}
+
+async function endCall() {
+  if (lkRoom) { await lkRoom.disconnect(); lkRoom=null; }
+  document.querySelectorAll('audio[data-lk-participant]').forEach(el=>el.remove());
+  activeTranscripts.forEach(el=>el.classList.add('tx-done')); activeTranscripts.clear();
+  modalTranscripts.clear();
+  callState='idle'; setTopbarCallState('idle');
+  hideCallModal();
+  if (hasNewLoad) { document.getElementById('reset-btn').style.display='flex'; }
+}
+
+// ── Call modal ───────────────────────────────────────────────
+let callModalTimerInt = null;
+function showCallModal(name, sub) {
+  document.getElementById('callName').textContent = name;
+  document.getElementById('callSub').textContent  = sub;
+  document.getElementById('callTimer').textContent = '0:00';
+  document.getElementById('callTranscript').innerHTML = '';
+  document.getElementById('callOverlay').classList.add('visible');
+  let secs=0;
+  clearInterval(callModalTimerInt);
+  callModalTimerInt = setInterval(()=>{
+    secs++;
+    const m=Math.floor(secs/60), s=secs%60;
+    document.getElementById('callTimer').textContent = m+':'+String(s).padStart(2,'0');
+  },1000);
+}
+function hideCallModal() {
+  clearInterval(callModalTimerInt);
+  document.getElementById('callOverlay').classList.remove('visible');
 }
 
 // ── Reset demo ────────────────────────────────────────────────
 async function resetDemo() {
   await Promise.all([
-    db.from('demo_loads').delete().eq('is_demo_row', true),
-    db.from('demo_feed').delete().eq('is_demo_row', true)
+    db.from('demo_loads').delete().eq('is_demo_row',true),
+    db.from('demo_feed').delete().eq('is_demo_row',true)
   ]);
-  hasNewLoad = false;
-  document.getElementById('reset-btn').style.display = 'none';
+  hasNewLoad=false; document.getElementById('reset-btn').style.display='none';
   await loadData();
 }
 
 // ── Tab switching ─────────────────────────────────────────────
-let activeTab = 'cc';
-
 function switchTab(tab) {
-  activeTab = tab;
-  document.getElementById('t1').className = 'tab' + (tab === 'lt' ? ' on' : '');
-  document.getElementById('t2').className = 'tab' + (tab === 'cc' ? ' on' : '');
-  document.getElementById('t3').className = 'tab' + (tab === 'ar' ? ' on' : '');
-  document.getElementById('lt-body').style.display  = tab === 'lt' ? 'grid' : 'none';
-  document.getElementById('cc-body').style.display  = tab === 'cc' ? 'grid' : 'none';
-  document.getElementById('ar-body').style.display  = tab === 'ar' ? 'grid' : 'none';
-  document.getElementById('kpis-lt').style.display  = tab === 'lt' ? 'flex' : 'none';
-  document.getElementById('kpis-cc').style.display  = tab === 'cc' ? 'flex' : 'none';
-  document.getElementById('kpis-ar').style.display  = tab === 'ar' ? 'flex' : 'none';
-  if (tab === 'lt') setCallState(callState);
-  else if (tab === 'cc') setCCCallState(ccCallState);
-  else              setARCallState(arCallState);
+  activeTab=tab;
+  ['lt','cc','ar'].forEach(t=>{
+    document.getElementById('t'+(t==='lt'?1:t==='cc'?2:3)).className='tab-btn'+(t===tab?' active':'');
+    document.getElementById('panel-'+t).style.display=(t===tab)?'flex':'none';
+    document.getElementById('feed-'+t).style.display=(t===tab)?'flex':'none';
+  });
+  const titles={lt:'Load Tender Feed',cc:'Carrier Check Feed',ar:'AR Collections Feed'};
+  document.getElementById('feedTitle').textContent=titles[tab];
+  document.getElementById('feedCount').textContent=feedCounts[tab]+' event'+(feedCounts[tab]!==1?'s':'');
+  if (tab==='lt') setTopbarCallState(callState);
+  else if (tab==='cc') syncCCBtn();
+  else syncARBtn();
+}
+
+function syncCCBtn() {
+  const btn=document.getElementById('call-btn'), lbl=document.getElementById('call-label');
+  btn.className='btn-call'+(ccAutoRunning?' call-active':'');
+  btn.disabled=false;
+  lbl.textContent=ccAutoRunning?'Stop Sequence':'Call Aria';
+}
+function syncARBtn() {
+  const btn=document.getElementById('call-btn'), lbl=document.getElementById('call-label');
+  btn.className='btn-call'+(arCallState==='active'?' call-active':arCallState==='connecting'?' call-connecting':'');
+  btn.disabled=arCallState==='connecting';
+  lbl.textContent=arCallState==='active'?'End Call':arCallState==='connecting'?'Connecting…':'Call Aria';
 }
 
 function activeToggleCall() {
-  if (activeTab === 'lt') toggleCall();
-  else if (activeTab === 'cc') ccToggleCall();
+  if (activeTab==='lt')  toggleCall();
+  else if (activeTab==='cc') ccAutoRunning?stopCCSequence():startCCSequence();
   else arToggleCall();
 }
+function activeEndCall() {
+  if (activeTab==='lt')  endCall();
+  else if (activeTab==='ar') arEndCall();
+  else hideCallModal();
+}
 function activeResetDemo() {
-  if (activeTab === 'lt') resetDemo();
-  else if (activeTab === 'cc') resetCCDemo();
+  if (activeTab==='lt') resetDemo();
+  else if (activeTab==='cc') resetCCDemo();
   else resetARDemo();
 }
 
-// ══════════════════════════════════════════════════════════════
-// OUTBOUND CARRIER CHECK — completely separate LiveKit + Supabase
-// ══════════════════════════════════════════════════════════════
+// ── Debug / Error helpers ────────────────────────────────────
+function dbg(msg) {
+  console.log('[LK]',msg);
+  let p=document.getElementById('dbg-panel');
+  if (!p) {
+    p=document.createElement('div'); p.id='dbg-panel';
+    p.style.cssText='position:fixed;bottom:16px;right:16px;width:360px;background:var(--slate-900);border:1px solid var(--slate-700);border-radius:var(--radius-md);padding:10px 12px;font-family:var(--font-mono);font-size:10px;color:var(--slate-400);z-index:9999;max-height:200px;overflow-y:auto';
+    p.innerHTML='<div style="color:var(--slate-500);font-size:9px;letter-spacing:1px;margin-bottom:6px">CALL DEBUG</div>';
+    document.body.appendChild(p);
+  }
+  const row=document.createElement('div');
+  row.style.cssText='padding:2px 0;border-top:1px solid var(--slate-800)';
+  row.textContent=msg;
+  if (msg.includes('✓')||msg.includes('OK')) row.style.color='var(--success-fg)';
+  if (msg.includes('✗')||msg.includes('ERROR')||msg.includes('error')) row.style.color='var(--danger-fg)';
+  p.appendChild(row); p.scrollTop=p.scrollHeight;
+}
+function showError(msg) {
+  let el=document.getElementById('call-error');
+  if (!el) {
+    el=document.createElement('div'); el.id='call-error';
+    el.style.cssText='position:fixed;bottom:16px;right:16px;background:var(--danger-bg);color:var(--danger-fg);border:1px solid var(--red-100);border-radius:var(--radius-md);padding:10px 14px;font-size:var(--text-sm);max-width:320px;z-index:999;display:none';
+    document.body.appendChild(el);
+  }
+  if (msg) { el.textContent='⚠ '+msg; el.style.display='block'; }
+  else      { el.style.display='none'; }
+}
 
-// ── CC Config (placeholders — fill in when LiveKit project is ready) ──
+// ══════════════════════════════════════════════════════════════
+// TRACK & TRACE (CC) — Supabase + LiveKit
+// ══════════════════════════════════════════════════════════════
 const CC_LK_API_KEY    = 'PLACEHOLDER_CC_API_KEY';
 const CC_LK_API_SECRET = 'PLACEHOLDER_CC_API_SECRET';
 const CC_LK_WS_URL     = 'wss://PLACEHOLDER.livekit.cloud';
 const CC_AGENT_NAME    = 'PLACEHOLDER_CC_AGENT';
 
-// ── CC State ──────────────────────────────────────────────────
-let ccLoads          = [];
-let ccHasCallMade    = false;
-let ccLkRoom         = null;
-let ccCallState      = 'idle';
-const ccActiveTranscripts = new Map();
+let ccLoads=[], ccHasCallMade=false, ccLkRoom=null, ccCallState='idle';
+const ccTranscripts=new Map();
+let ccAutoRunning=false, ccDialerInt=null, ccDialerSecs=0;
 
-// ── CC Render: loads table ────────────────────────────────────
 function renderCCLoads() {
-  const confirmed = ccLoads.filter(l => l.status === 'confirmed').length;
-  const pending   = ccLoads.filter(l => l.status === 'pending_check').length;
-  document.getElementById('cc-k2').textContent = confirmed;
-  document.getElementById('cc-k3').textContent = pending;
-
-  document.getElementById('cc-dcol').innerHTML =
-    `<div class="dhdr">
+  const confirmed=ccLoads.filter(l=>l.status==='confirmed').length;
+  const pending  =ccLoads.filter(l=>l.status==='pending_check').length;
+  document.getElementById('cc-k2').textContent=confirmed;
+  document.getElementById('cc-k3').textContent=pending;
+  document.getElementById('cc-count').textContent=ccLoads.length+' loads';
+  const body=document.getElementById('cc-table-body');
+  if (!ccLoads.length) { body.innerHTML='<div class="feed-empty">No carrier loads found.</div>'; return; }
+  body.innerHTML=ccLoads.map(l=>`
+    <div class="table-row cc-cols${l.status==='confirmed'?' row-highlight':''}">
       <div>
-        <div class="dtitle">Dispatch-Trak — Carrier Checks</div>
-        <div class="dsub">Outbound Call Queue · Saturn Freight Systems</div>
+        <div class="cell-primary">${l.carrier}</div>
+        <div class="cell-ref">${l.ref}</div>
       </div>
-      <div class="dbadges">
-        <span class="db db-b">${ccLoads.length} LOADS</span>
-        ${confirmed ? `<span class="db db-g">${confirmed} CONFIRMED</span>` : ''}
-      </div>
-    </div>
-    <div class="dbody">
-      <table>
-        <thead><tr>
-          <th>REF #</th><th>CARRIER</th><th>ROUTE</th><th>PICKUP</th>
-          <th>PALLETS</th><th>CALL STATUS</th><th>ETA CONFIRMED</th><th>OUTCOME</th>
-        </tr></thead>
-        <tbody>
-          ${ccLoads.map(l => `
-            <tr class="${l.status==='confirmed'?'row-new':''}">
-              <td class="t-ref ${l.status==='confirmed'?'g':''}">${l.ref}</td>
-              <td class="t-str">${l.carrier}</td>
-              <td class="t-mono">${l.route || (l.origin + ' → ' + l.destination)}</td>
-              <td>${l.pickup_time}</td>
-              <td style="text-align:center">${l.pallets}</td>
-              <td>${ccCallStatusPill(l.call_status)}</td>
-              <td class="t-mono">${l.eta_confirmed || '—'}</td>
-              <td>${ccOutcomePill(l.status)}</td>
-            </tr>`).join('')}
-        </tbody>
-      </table>
-    </div>
-    ${ccHasCallMade ? `
-      <div class="bar-foot">
-        <span class="bar-dot pls" style="background:#F59E0B"></span>
-        <span class="bar-msg" style="color:#F59E0B">Carrier check completed by Aria — status updated live</span>
-      </div>` : ''}`;
+      <div class="cell-muted" style="font-size:var(--text-xs)">${l.route||(l.origin+' → '+l.destination)}</div>
+      <div class="cell-muted">${l.pickup_time}</div>
+      <div>${callStatusChip(l.call_status)}</div>
+      <div>${statusChip(l.status)}</div>
+    </div>`).join('');
 }
 
-function ccCallStatusPill(st) {
-  if (st === 'in_progress') return '<span class="pill p-act">In Progress</span>';
-  if (st === 'completed')   return '<span class="pill p-don">Completed</span>';
-  return '<span class="pill" style="background:#131313;color:#3D5170">Not Called</span>';
-}
-function ccOutcomePill(st) {
-  if (st === 'confirmed')    return '<span class="pill p-new">Confirmed ✦</span>';
-  if (st === 'issue_raised') return '<span class="pill" style="background:#2D1800;color:#F59E0B">Issue Raised</span>';
-  if (st === 'rescheduled')  return '<span class="pill" style="background:#0A1830;color:#60A5FA">Rescheduled</span>';
-  return '<span class="pill" style="background:#131313;color:#3D5170">Pending</span>';
-}
+function renderCCFeedCard(row, prepend) { renderFeedCard(row,'feed-cc',prepend); incFeed('cc'); }
 
-// ── CC Render: feed card ──────────────────────────────────────
-function renderCCFeedCard(row, prepend) {
-  const f   = document.getElementById('cc-feed');
-  const who = row.who === 'aria'    ? 'Aria AI · Saturn Freight'
-            : row.who === 'carrier' ? 'Carrier · Inbound'
-            : 'System · Saturn Freight';
-  const d   = document.createElement('div');
-  d.className = 'fc' + (row.who === 'aria' ? ' live' : '');
-  d.innerHTML =
-    `<div class="fc-row1">
-      <span class="fc-title">${row.title}</span>
-      <span class="fc-time">${row.time_str}</span>
-    </div>
-    <div class="fc-who">${who}</div>
-    <div class="fc-q">"${row.quote.substring(0,90)}${row.quote.length>90?'…':''}"</div>
-    <div class="fc-foot">
-      ${row.tool ? `<span class="fc-tool">${row.tool}</span>` : '<span></span>'}
-      <span class="fc-badge b-${row.badge_type}">${
-        row.badge_type==='auto' ? 'Automated' :
-        row.badge_type==='esc'  ? 'Escalated' : 'Live'}</span>
-    </div>`;
-  if (prepend) f.insertBefore(d, f.firstChild);
-  else         f.appendChild(d);
-}
-
-// ── CC Transcript bubbles ─────────────────────────────────────
-function ccUpdateTranscriptEl(segId, text, isAgent, isFinal) {
-  if (!text || !text.trim()) return;
-  const cls   = isAgent ? 'tx-aria' : 'tx-user';
-  const label = isAgent ? '⚡ ARIA' : '👤 YOU';
-
-  let el = ccActiveTranscripts.get(segId);
+function ccUpdateTranscript(segId, text, isAgent, isFinal) {
+  if (!text||!text.trim()) return;
+  const cls=isAgent?'tx-aria':'tx-user', label=isAgent?'⚡ ARIA':'👤 YOU';
+  let el=ccTranscripts.get(segId);
   if (!el) {
-    el = document.createElement('div');
-    el.className = `tx ${cls}`;
-    el.innerHTML =
-      `<div class="tx-who">${label}</div>` +
-      `<span class="tx-text"></span>` +
-      `<span class="tx-cursor"></span>`;
-    const feed = document.getElementById('cc-feed');
-    feed.insertBefore(el, feed.firstChild);
-    ccActiveTranscripts.set(segId, el);
+    el=document.createElement('div'); el.className=`tx-bubble ${cls}`;
+    el.innerHTML=`<div class="tx-who">${label}</div><span class="tx-text"></span><span class="tx-cursor"></span>`;
+    const feed=document.getElementById('feed-cc'); feed.insertBefore(el,feed.firstChild);
+    ccTranscripts.set(segId,el);
   }
-  el.querySelector('.tx-text').textContent = text;
-  if (isFinal) {
-    el.classList.add('tx-done');
-    ccActiveTranscripts.delete(segId);
-  }
+  el.querySelector('.tx-text').textContent=text;
+  if (isFinal) { el.classList.add('tx-done'); ccTranscripts.delete(segId); }
 }
 
-// ── CC Load initial data ──────────────────────────────────────
 async function loadCCData() {
-  const [lr, fr] = await Promise.all([
-    db.from('carrier_check_loads').select('*').order('created_at', {ascending: true}),
-    db.from('carrier_check_feed').select('*').order('created_at', {ascending: false})
+  const [lr,fr]=await Promise.all([
+    db.from('carrier_check_loads').select('*').order('created_at',{ascending:true}),
+    db.from('carrier_check_feed').select('*').order('created_at',{ascending:false})
   ]);
-  if (lr.error || fr.error) { console.error(lr.error || fr.error); return; }
-  ccLoads      = lr.data;
-  ccHasCallMade = ccLoads.some(l => l.call_status === 'completed');
-  document.getElementById('cc-k1').textContent = ccLoads.filter(l => l.call_status === 'completed').length;
+  if (lr.error||fr.error) { console.error(lr.error||fr.error); return; }
+  ccLoads=lr.data; ccHasCallMade=ccLoads.some(l=>l.call_status==='completed');
+  document.getElementById('cc-k1').textContent=ccLoads.filter(l=>l.call_status==='completed').length;
   renderCCLoads();
-  document.getElementById('cc-feed').innerHTML = '';
-  fr.data.forEach(r => renderCCFeedCard(r, false));
+  document.getElementById('feed-cc').innerHTML=''; feedCounts.cc=0;
+  fr.data.forEach(r=>{ renderFeedCard(r,'feed-cc',false); feedCounts.cc++; });
+  if (activeTab==='cc') document.getElementById('feedCount').textContent=feedCounts.cc+' events';
 }
 
-// ── CC Supabase Realtime ──────────────────────────────────────
 function subscribeCCRealtime() {
   db.channel('cc-loads')
-    .on('postgres_changes', {event:'*', schema:'public', table:'carrier_check_loads'}, p => {
-      if (p.eventType === 'INSERT') {
-        ccLoads.push(p.new);
-      } else if (p.eventType === 'UPDATE') {
-        const idx = ccLoads.findIndex(l => l.id === p.new.id);
-        if (idx > -1) ccLoads[idx] = p.new;
-      } else if (p.eventType === 'DELETE') {
-        ccLoads = ccLoads.filter(l => l.id !== p.old.id);
-      }
-      ccHasCallMade = ccLoads.some(l => l.call_status === 'completed');
+    .on('postgres_changes',{event:'*',schema:'public',table:'carrier_check_loads'},p=>{
+      if (p.eventType==='INSERT') ccLoads.push(p.new);
+      else if (p.eventType==='UPDATE') { const i=ccLoads.findIndex(l=>l.id===p.new.id); if(i>-1) ccLoads[i]=p.new; }
+      else if (p.eventType==='DELETE') ccLoads=ccLoads.filter(l=>l.id!==p.old.id);
+      ccHasCallMade=ccLoads.some(l=>l.call_status==='completed');
+      document.getElementById('cc-k1').textContent=ccLoads.filter(l=>l.call_status==='completed').length;
       renderCCLoads();
-      document.getElementById('cc-k1').textContent =
-        ccLoads.filter(l => l.call_status === 'completed').length;
-    })
-    .subscribe();
-
-  db.channel('cc-calls')
-    .on('postgres_changes', {event:'INSERT', schema:'public', table:'carrier_check_calls'}, () => {
-      document.getElementById('cc-k1').textContent =
-        parseInt(document.getElementById('cc-k1').textContent) + 1;
-    })
-    .subscribe();
-
+    }).subscribe();
   db.channel('cc-feed')
-    .on('postgres_changes', {event:'INSERT', schema:'public', table:'carrier_check_feed'}, p => {
-      renderCCFeedCard(p.new, true);
-    })
-    .on('postgres_changes', {event:'DELETE', schema:'public', table:'carrier_check_feed'}, () => {
-      loadCCData();
-    })
+    .on('postgres_changes',{event:'INSERT',schema:'public',table:'carrier_check_feed'},p=>renderCCFeedCard(p.new,true))
+    .on('postgres_changes',{event:'DELETE',schema:'public',table:'carrier_check_feed'},()=>loadCCData())
     .subscribe();
 }
 
-// ── CC LiveKit JWT helpers ────────────────────────────────────
-async function ccSignJWT(payload) {
-  const hdr = b64url(JSON.stringify({alg:'HS256',typ:'JWT'}));
-  const pay = b64url(JSON.stringify(payload));
-  const inp = `${hdr}.${pay}`;
-  const enc = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    'raw', enc.encode(CC_LK_API_SECRET), {name:'HMAC',hash:'SHA-256'}, false, ['sign']
-  );
-  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(inp));
-  return `${inp}.${b64urlBuf(sig)}`;
+function startCCSequence() {
+  ccAutoRunning=true; syncCCBtn();
+  const pill=document.getElementById('statusPill'), txt=document.getElementById('statusText');
+  pill.className='status-pill live'; txt.textContent='Live';
 }
-async function ccMakeParticipantToken(room) {
-  const now = Math.floor(Date.now() / 1000);
-  return ccSignJWT({
-    iss: CC_LK_API_KEY, exp: now + 3600, nbf: now,
-    jti: `cc-user-${Date.now()}`,
-    video: { room, roomJoin: true, canPublish: true, canSubscribe: true, canPublishData: true },
-    name: 'CSA Demo Viewer', metadata: ''
-  });
-}
-async function ccMakeAdminToken(room) {
-  const now = Math.floor(Date.now() / 1000);
-  return ccSignJWT({
-    iss: CC_LK_API_KEY, exp: now + 300, nbf: now,
-    video: { room, roomCreate: true, roomAdmin: true }
-  });
-}
-async function ccDispatchAgent(room) {
-  try {
-    const adminToken = await ccMakeAdminToken(room);
-    const httpUrl    = CC_LK_WS_URL.replace('wss://', 'https://');
-    const res = await fetch(
-      `${httpUrl}/twirp/livekit.AgentDispatchService/CreateDispatch`,
-      {
-        method:  'POST',
-        headers: { 'Authorization': 'Bearer ' + adminToken, 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ room, agentName: CC_AGENT_NAME })
-      }
-    );
-    const text = await res.text();
-    if (!res.ok) { dbg('[CC] Dispatch error ' + res.status + ': ' + text); return; }
-    dbg('[CC] Dispatch OK — ' + CC_AGENT_NAME + ' inbound');
-  } catch (e) { dbg('[CC] Dispatch failed: ' + e.message); }
-}
-
-// ── CC Call functions ─────────────────────────────────────────
-function ccToggleCall() {
-  if (ccCallState === 'idle')   { ccStartCall(); return; }
-  if (ccCallState === 'active') { ccEndCall();   return; }
+function stopCCSequence() {
+  ccAutoRunning=false; clearInterval(ccDialerInt);
+  document.getElementById('liveDialerCard').classList.remove('visible');
+  syncCCBtn();
+  const pill=document.getElementById('statusPill'), txt=document.getElementById('statusText');
+  pill.className='status-pill connecting'; txt.textContent='Ready';
 }
 
 async function ccStartCall() {
-  setCCCallState('connecting');
-  showError('');
-  dbg('[CC] Starting call…');
+  ccCallState='connecting'; syncCCBtn();
   try {
-    if (typeof LivekitClient === 'undefined') throw new Error('LiveKit SDK not loaded.');
-    const room  = 'cc-' + Math.random().toString(36).slice(2, 9);
-    const token = await ccMakeParticipantToken(room);
-    dbg('[CC] Token ready · room: ' + room);
-
-    ccLkRoom = new LivekitClient.Room({ adaptiveStream: true, dynacast: true });
-
-    ccLkRoom.on(LivekitClient.RoomEvent.Disconnected, () => {
-      dbg('[CC] Disconnected.');
-      setCCCallState('idle');
-    });
-    ccLkRoom.on(LivekitClient.RoomEvent.TrackSubscribed, (track, _pub, participant) => {
-      if (track.kind === LivekitClient.Track.Kind.Audio) {
-        const el = track.attach();
-        el.dataset.lkParticipant = 'cc-' + participant.sid;
-        document.body.appendChild(el);
-        dbg('[CC] Agent audio attached');
+    if (typeof LivekitClient==='undefined') throw new Error('LiveKit SDK not loaded.');
+    const room='cc-'+Math.random().toString(36).slice(2,9);
+    const token=await makeParticipantToken(room,CC_LK_API_KEY,CC_LK_API_SECRET);
+    ccLkRoom=new LivekitClient.Room({adaptiveStream:true,dynacast:true});
+    ccLkRoom.on(LivekitClient.RoomEvent.Disconnected,()=>{ ccCallState='idle'; syncCCBtn(); });
+    ccLkRoom.on(LivekitClient.RoomEvent.TrackSubscribed,(track,_pub,p)=>{
+      if (track.kind===LivekitClient.Track.Kind.Audio) {
+        const el=track.attach(); el.dataset.lkParticipant='cc-'+p.sid; document.body.appendChild(el);
       }
     });
-    ccLkRoom.on(LivekitClient.RoomEvent.TrackUnsubscribed, (track) => {
-      track.detach().forEach(el => el.remove());
+    ccLkRoom.on(LivekitClient.RoomEvent.TrackUnsubscribed,track=>track.detach().forEach(el=>el.remove()));
+    ccLkRoom.on(LivekitClient.RoomEvent.ActiveSpeakersChanged,spk=>{
+      if (activeTab==='cc') updateAudioBars(spk.some(p=>p!==ccLkRoom.localParticipant));
     });
-    ccLkRoom.on(LivekitClient.RoomEvent.ActiveSpeakersChanged, spk => {
-      if (activeTab === 'cc')
-        updateAudioBars(spk.some(p => p !== ccLkRoom.localParticipant));
-    });
-    ccLkRoom.on(LivekitClient.RoomEvent.ParticipantConnected, p => {
-      dbg('[CC] Participant joined: ' + p.identity);
-    });
-
-    await ccLkRoom.connect(CC_LK_WS_URL, token);
-    dbg('[CC] Connected');
-
-    if (typeof ccLkRoom.registerTextStreamHandler === 'function') {
-      ccLkRoom.registerTextStreamHandler('lk.transcription', async (reader, participantInfo) => {
-        const attrs   = (reader.info && reader.info.attributes) ? reader.info.attributes : {};
-        const segId   = attrs['lk.segment_id'];
-        const isFinal = attrs['lk.transcription_final'] !== 'false';
-        const isAgent = participantInfo.identity !== ccLkRoom.localParticipant.identity;
-        if (!segId && !isFinal) return;
-        const stableId = segId || ('cc-ts-' + Date.now());
-        try {
-          const text = await reader.readAll();
-          ccUpdateTranscriptEl(stableId, text, isAgent, isFinal);
-        } catch(e) { dbg('[CC] TextStream error: ' + e.message); }
-      });
-      ccLkRoom.registerTextStreamHandler('lk.chat', async (reader, participantInfo) => {
-        const isAgent = participantInfo.identity !== ccLkRoom.localParticipant.identity;
-        try {
-          const text = await reader.readAll();
-          ccUpdateTranscriptEl('chat-' + Date.now(), text, isAgent, true);
-        } catch(e) {}
+    await ccLkRoom.connect(CC_LK_WS_URL,token);
+    if (typeof ccLkRoom.registerTextStreamHandler==='function') {
+      ccLkRoom.registerTextStreamHandler('lk.transcription',async(reader,pInfo)=>{
+        const attrs=(reader.info&&reader.info.attributes)||{};
+        const segId=attrs['lk.segment_id'], isFinal=attrs['lk.transcription_final']!=='false';
+        const isAgent=pInfo.identity!==ccLkRoom.localParticipant.identity;
+        if (!segId&&!isFinal) return;
+        try { const text=await reader.readAll(); ccUpdateTranscript(segId||('cc-'+Date.now()),text,isAgent,isFinal); } catch(e){}
       });
     }
-
-    await ccDispatchAgent(room);
+    await dispatchAgent(room,CC_LK_WS_URL,CC_LK_API_KEY,CC_LK_API_SECRET,CC_AGENT_NAME);
     await ccLkRoom.startAudio();
     await ccLkRoom.localParticipant.setMicrophoneEnabled(true);
-    setCCCallState('active');
-    dbg('[CC] Call live');
-  } catch (err) {
-    console.error('[CC LiveKit]', err);
-    dbg('[CC] ✗ ERROR: ' + (err.message || err));
-    setCCCallState('idle');
-    showError(err.message || 'CC connection failed');
-  }
+    ccCallState='active'; syncCCBtn();
+  } catch(err) { dbg('[CC] ERROR: '+(err.message||err)); ccCallState='idle'; syncCCBtn(); showError(err.message||'CC failed'); }
 }
 
 async function ccEndCall() {
-  if (ccLkRoom) {
-    await ccLkRoom.disconnect();
-    ccLkRoom = null;
-  }
-  document.querySelectorAll('audio[data-lk-participant^="cc-"]').forEach(el => el.remove());
-  ccActiveTranscripts.forEach(el => el.classList.add('tx-done'));
-  ccActiveTranscripts.clear();
-  setCCCallState('idle');
+  if (ccLkRoom) { await ccLkRoom.disconnect(); ccLkRoom=null; }
+  document.querySelectorAll('audio[data-lk-participant^="cc-"]').forEach(el=>el.remove());
+  ccTranscripts.forEach(el=>el.classList.add('tx-done')); ccTranscripts.clear();
+  ccCallState='idle'; syncCCBtn();
 }
 
-function setCCCallState(state) {
-  ccCallState = state;
-  if (activeTab !== 'cc') return; // don't touch the button if CC tab isn't visible
-  const btn   = document.getElementById('call-btn');
-  const icon  = document.getElementById('call-icon');
-  const label = document.getElementById('call-label');
-  const rst   = document.getElementById('reset-btn');
-  if (state === 'idle') {
-    btn.className     = 'call-btn';
-    btn.disabled      = false;
-    icon.textContent  = '📞';
-    label.textContent = 'Call Aria';
-    rst.style.display = ccHasCallMade ? 'block' : 'none';
-    updateAudioBars(false);
-  } else if (state === 'connecting') {
-    btn.className     = 'call-btn connecting';
-    btn.disabled      = true;
-    icon.textContent  = '⏳';
-    label.textContent = 'Connecting…';
-    rst.style.display = 'none';
-  } else if (state === 'active') {
-    btn.className    = 'call-btn active';
-    btn.disabled     = false;
-    icon.innerHTML   = `<div class="audio-bars" id="audio-bars">
-      ${[.35,.55,.7,.45,.6].map((d,i) =>
-        `<div class="audio-bar" style="--dur:${d}s;height:3px" id="ab${i}"></div>`
-      ).join('')}
-    </div>`;
-    label.textContent = 'End Call';
-    rst.style.display = 'none';
-  }
-}
-
-// ── CC Reset ──────────────────────────────────────────────────
 async function resetCCDemo() {
   await Promise.all([
-    db.from('carrier_check_loads').update({status:'pending_check', call_status:'not_called', eta_confirmed:null}).eq('is_demo_row', true),
-    db.from('carrier_check_calls').delete().eq('is_demo_row', true),
-    db.from('carrier_check_feed').delete().eq('is_demo_row', true)
+    db.from('carrier_check_loads').update({status:'pending_check',call_status:'not_called',eta_confirmed:null}).eq('is_demo_row',true),
+    db.from('carrier_check_calls').delete().eq('is_demo_row',true),
+    db.from('carrier_check_feed').delete().eq('is_demo_row',true)
   ]);
-  ccHasCallMade = false;
-  document.getElementById('reset-btn').style.display = 'none';
-  await loadCCData();
+  ccHasCallMade=false; document.getElementById('reset-btn').style.display='none'; await loadCCData();
 }
 
 // ══════════════════════════════════════════════════════════════
-// AR COLLECTIONS — separate LiveKit project (placeholders)
+// AR COLLECTIONS — separate LiveKit
 // ══════════════════════════════════════════════════════════════
-
 const AR_LK_API_KEY    = 'PLACEHOLDER_AR_API_KEY';
 const AR_LK_API_SECRET = 'PLACEHOLDER_AR_API_SECRET';
 const AR_LK_WS_URL     = 'wss://PLACEHOLDER.livekit.cloud';
 const AR_AGENT_NAME    = 'PLACEHOLDER_AR_AGENT';
 
-let arAccounts       = [];
-let arHasCallMade    = false;
-let arLkRoom         = null;
-let arCallState      = 'idle';
-const arActiveTranscripts = new Map();
+let arAccounts=[], arHasCallMade=false, arLkRoom=null, arCallState='idle';
+const arTranscripts=new Map();
 
-function fmtDollars(n) {
-  if (!n) return '$0';
-  return '$' + Number(n).toLocaleString('en-US', {maximumFractionDigits: 0});
-}
+function fmtDollars(n) { return n?'$'+Number(n).toLocaleString('en-US',{maximumFractionDigits:0}):'$0'; }
 
 function renderARAccounts() {
-  const promised  = arAccounts.filter(a => a.status === 'payment_promised');
-  const collected = arAccounts.filter(a => a.status === 'paid');
-  const pending   = arAccounts.filter(a => a.status === 'pending_call').length;
-
-  const promisedAmt  = promised.reduce((s, a)  => s + Number(a.amount_due || 0), 0);
-  const collectedAmt = collected.reduce((s, a) => s + Number(a.amount_due || 0), 0);
-
-  document.getElementById('ar-k2').textContent = fmtDollars(promisedAmt);
-  document.getElementById('ar-k3').textContent = fmtDollars(collectedAmt);
-
-  document.getElementById('ar-dcol').innerHTML =
-    `<div class="dhdr">
+  const promised =arAccounts.filter(a=>a.status==='payment_promised');
+  const collected=arAccounts.filter(a=>a.status==='paid');
+  document.getElementById('ar-k2').textContent=fmtDollars(promised.reduce((s,a)=>s+Number(a.amount_due||0),0)).replace('$','');
+  document.getElementById('ar-k3').textContent=fmtDollars(collected.reduce((s,a)=>s+Number(a.amount_due||0),0)).replace('$','');
+  document.getElementById('ar-count').textContent=arAccounts.length+' accounts';
+  const body=document.getElementById('ar-table-body');
+  if (!arAccounts.length) { body.innerHTML='<div class="feed-empty">No accounts found.</div>'; return; }
+  body.innerHTML=arAccounts.map(a=>`
+    <div class="table-row ar-cols${a.status==='payment_promised'||a.status==='paid'?' row-highlight':''}">
       <div>
-        <div class="dtitle">Account-Trak — AR Collections</div>
-        <div class="dsub">Overdue Accounts · Saturn Freight Systems</div>
+        <div class="cell-primary">${a.customer}</div>
+        <div class="cell-ref">${a.invoice_no}</div>
       </div>
-      <div class="dbadges">
-        <span class="db db-b">${arAccounts.length} ACCOUNTS</span>
-        ${pending ? `<span class="db" style="background:#1A1A0A;color:#F59E0B;border:1px solid #3D2800">${pending} PENDING</span>` : ''}
+      <div class="cell-amount">$${Number(a.amount_due).toLocaleString()}</div>
+      <div style="color:${a.days_overdue>60?'var(--danger-fg)':a.days_overdue>30?'var(--warning-fg)':'var(--text-muted)'}">
+        ${a.days_overdue}d
       </div>
-    </div>
-    <div class="dbody">
-      <table>
-        <thead><tr>
-          <th>INVOICE #</th><th>CUSTOMER</th><th>AMOUNT DUE</th><th>DAYS OVERDUE</th>
-          <th>CALL STATUS</th><th>OUTCOME</th><th>PAYMENT DATE</th><th>NOTES</th>
-        </tr></thead>
-        <tbody>
-          ${arAccounts.map(a => `
-            <tr class="${a.status==='payment_promised'||a.status==='paid'?'row-new':''}">
-              <td class="t-ref ${a.status==='paid'?'g':''}">${a.invoice_no}</td>
-              <td class="t-str">${a.customer}</td>
-              <td class="t-mono t-str">$${Number(a.amount_due).toLocaleString()}</td>
-              <td style="color:${a.days_overdue>60?'#F87171':a.days_overdue>30?'#F59E0B':'#6B7A8D'}">${a.days_overdue}d</td>
-              <td>${arCallStatusPill(a.call_status)}</td>
-              <td>${arOutcomePill(a.status)}</td>
-              <td class="t-mono">${a.payment_date || '-'}</td>
-              <td style="font-size:10px;color:#5A6A7A;max-width:160px;overflow:hidden;text-overflow:ellipsis">${a.notes || ''}</td>
-            </tr>`).join('')}
-        </tbody>
-      </table>
-    </div>
-    ${arHasCallMade ? `
-      <div class="bar-foot">
-        <span class="bar-dot pls" style="background:#34D399"></span>
-        <span class="bar-msg" style="color:#34D399">Payment secured by Aria — account updated live</span>
-      </div>` : ''}`;
+      <div>${callStatusChip(a.call_status)}</div>
+      <div>${statusChip(a.status)}</div>
+    </div>`).join('');
 }
 
-function arCallStatusPill(st) {
-  if (st === 'in_progress') return '<span class="pill p-act">In Progress</span>';
-  if (st === 'completed')   return '<span class="pill p-don">Completed</span>';
-  return '<span class="pill" style="background:#131313;color:#3D5170">Not Called</span>';
-}
-function arOutcomePill(st) {
-  if (st === 'paid')             return '<span class="pill p-new">Collected ✦</span>';
-  if (st === 'payment_promised') return '<span class="pill p-act">Promised</span>';
-  if (st === 'escalated')        return '<span class="pill" style="background:#2D1800;color:#F59E0B">Escalated</span>';
-  return '<span class="pill" style="background:#131313;color:#3D5170">Pending</span>';
-}
+function renderARFeedCard(row, prepend) { renderFeedCard(row,'feed-ar',prepend); incFeed('ar'); }
 
-function renderARFeedCard(row, prepend) {
-  const f   = document.getElementById('ar-feed');
-  const who = row.who === 'aria'     ? 'Aria AI · Saturn Freight'
-            : row.who === 'customer' ? 'Customer · Inbound'
-            : 'System · Saturn Freight';
-  const d   = document.createElement('div');
-  d.className = 'fc' + (row.who === 'aria' ? ' live' : '');
-  d.innerHTML =
-    `<div class="fc-row1">
-      <span class="fc-title">${row.title}</span>
-      <span class="fc-time">${row.time_str}</span>
-    </div>
-    <div class="fc-who">${who}</div>
-    <div class="fc-q">"${row.quote.substring(0,90)}${row.quote.length>90?'...':''}"</div>
-    <div class="fc-foot">
-      ${row.tool ? `<span class="fc-tool">${row.tool}</span>` : '<span></span>'}
-      <span class="fc-badge b-${row.badge_type}">${
-        row.badge_type==='auto' ? 'Automated' :
-        row.badge_type==='esc'  ? 'Escalated' : 'Live'}</span>
-    </div>`;
-  if (prepend) f.insertBefore(d, f.firstChild);
-  else         f.appendChild(d);
-}
-
-function arUpdateTranscriptEl(segId, text, isAgent, isFinal) {
-  if (!text || !text.trim()) return;
-  const cls   = isAgent ? 'tx-aria' : 'tx-user';
-  const label = isAgent ? 'ARIA' : 'YOU';
-  let el = arActiveTranscripts.get(segId);
+function arUpdateTranscript(segId, text, isAgent, isFinal) {
+  if (!text||!text.trim()) return;
+  const cls=isAgent?'tx-aria':'tx-user', label=isAgent?'⚡ ARIA':'👤 YOU';
+  let el=arTranscripts.get(segId);
   if (!el) {
-    el = document.createElement('div');
-    el.className = `tx ${cls}`;
-    el.innerHTML = `<div class="tx-who">${label}</div><span class="tx-text"></span><span class="tx-cursor"></span>`;
-    const feed = document.getElementById('ar-feed');
-    feed.insertBefore(el, feed.firstChild);
-    arActiveTranscripts.set(segId, el);
+    el=document.createElement('div'); el.className=`tx-bubble ${cls}`;
+    el.innerHTML=`<div class="tx-who">${label}</div><span class="tx-text"></span><span class="tx-cursor"></span>`;
+    const feed=document.getElementById('feed-ar'); feed.insertBefore(el,feed.firstChild);
+    arTranscripts.set(segId,el);
   }
-  el.querySelector('.tx-text').textContent = text;
-  if (isFinal) { el.classList.add('tx-done'); arActiveTranscripts.delete(segId); }
+  el.querySelector('.tx-text').textContent=text;
+  if (isFinal) { el.classList.add('tx-done'); arTranscripts.delete(segId); }
+  updateModalTranscript(segId,text,isAgent,isFinal);
 }
 
 async function loadARData() {
-  const [ar, fr] = await Promise.all([
-    db.from('ar_accounts').select('*').order('days_overdue', {ascending: false}),
-    db.from('ar_feed').select('*').order('created_at', {ascending: false})
+  const [ar,fr]=await Promise.all([
+    db.from('ar_accounts').select('*').order('days_overdue',{ascending:false}),
+    db.from('ar_feed').select('*').order('created_at',{ascending:false})
   ]);
-  if (ar.error || fr.error) { console.error(ar.error || fr.error); return; }
-  arAccounts    = ar.data;
-  arHasCallMade = arAccounts.some(a => a.call_status === 'completed');
-  document.getElementById('ar-k1').textContent = arAccounts.filter(a => a.call_status === 'completed').length;
+  if (ar.error||fr.error) { console.error(ar.error||fr.error); return; }
+  arAccounts=ar.data; arHasCallMade=arAccounts.some(a=>a.call_status==='completed');
+  document.getElementById('ar-k1').textContent=arAccounts.filter(a=>a.call_status==='completed').length;
   renderARAccounts();
-  document.getElementById('ar-feed').innerHTML = '';
-  fr.data.forEach(r => renderARFeedCard(r, false));
+  document.getElementById('feed-ar').innerHTML=''; feedCounts.ar=0;
+  fr.data.forEach(r=>{ renderFeedCard(r,'feed-ar',false); feedCounts.ar++; });
+  if (activeTab==='ar') document.getElementById('feedCount').textContent=feedCounts.ar+' events';
 }
 
 function subscribeARRealtime() {
   db.channel('ar-accounts')
-    .on('postgres_changes', {event:'*', schema:'public', table:'ar_accounts'}, p => {
-      if (p.eventType === 'UPDATE') {
-        const idx = arAccounts.findIndex(a => a.id === p.new.id);
-        if (idx > -1) arAccounts[idx] = p.new;
-      } else if (p.eventType === 'INSERT') {
-        arAccounts.push(p.new);
-      } else if (p.eventType === 'DELETE') {
-        arAccounts = arAccounts.filter(a => a.id !== p.old.id);
-      }
-      arHasCallMade = arAccounts.some(a => a.call_status === 'completed');
-      document.getElementById('ar-k1').textContent = arAccounts.filter(a => a.call_status === 'completed').length;
+    .on('postgres_changes',{event:'*',schema:'public',table:'ar_accounts'},p=>{
+      if (p.eventType==='UPDATE') { const i=arAccounts.findIndex(a=>a.id===p.new.id); if(i>-1) arAccounts[i]=p.new; }
+      else if (p.eventType==='INSERT') arAccounts.push(p.new);
+      else if (p.eventType==='DELETE') arAccounts=arAccounts.filter(a=>a.id!==p.old.id);
+      arHasCallMade=arAccounts.some(a=>a.call_status==='completed');
+      document.getElementById('ar-k1').textContent=arAccounts.filter(a=>a.call_status==='completed').length;
       renderARAccounts();
-    })
-    .subscribe();
-
+    }).subscribe();
   db.channel('ar-feed')
-    .on('postgres_changes', {event:'INSERT', schema:'public', table:'ar_feed'}, p => {
-      renderARFeedCard(p.new, true);
-    })
-    .on('postgres_changes', {event:'DELETE', schema:'public', table:'ar_feed'}, () => {
-      loadARData();
-    })
+    .on('postgres_changes',{event:'INSERT',schema:'public',table:'ar_feed'},p=>renderARFeedCard(p.new,true))
+    .on('postgres_changes',{event:'DELETE',schema:'public',table:'ar_feed'},()=>loadARData())
     .subscribe();
-}
-
-async function arSignJWT(payload) {
-  const hdr = b64url(JSON.stringify({alg:'HS256',typ:'JWT'}));
-  const pay = b64url(JSON.stringify(payload));
-  const inp = `${hdr}.${pay}`;
-  const enc = new TextEncoder();
-  const key = await crypto.subtle.importKey('raw', enc.encode(AR_LK_API_SECRET), {name:'HMAC',hash:'SHA-256'}, false, ['sign']);
-  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(inp));
-  return `${inp}.${b64urlBuf(sig)}`;
-}
-async function arMakeParticipantToken(room) {
-  const now = Math.floor(Date.now() / 1000);
-  return arSignJWT({ iss: AR_LK_API_KEY, exp: now+3600, nbf: now, jti: `ar-user-${Date.now()}`,
-    video: {room, roomJoin:true, canPublish:true, canSubscribe:true, canPublishData:true}, name:'CSA Demo Viewer', metadata:'' });
-}
-async function arMakeAdminToken(room) {
-  const now = Math.floor(Date.now() / 1000);
-  return arSignJWT({ iss: AR_LK_API_KEY, exp: now+300, nbf: now, video: {room, roomCreate:true, roomAdmin:true} });
-}
-async function arDispatchAgent(room) {
-  try {
-    const adminToken = await arMakeAdminToken(room);
-    const httpUrl    = AR_LK_WS_URL.replace('wss://', 'https://');
-    const res = await fetch(`${httpUrl}/twirp/livekit.AgentDispatchService/CreateDispatch`,
-      { method:'POST', headers:{'Authorization':'Bearer '+adminToken,'Content-Type':'application/json'},
-        body: JSON.stringify({room, agentName: AR_AGENT_NAME}) });
-    const text = await res.text();
-    if (!res.ok) { dbg('[AR] Dispatch error '+res.status+': '+text); return; }
-    dbg('[AR] Dispatch OK');
-  } catch(e) { dbg('[AR] Dispatch failed: '+e.message); }
 }
 
 function arToggleCall() {
-  if (arCallState === 'idle')   { arStartCall(); return; }
-  if (arCallState === 'active') { arEndCall();   return; }
+  if (arCallState==='idle')   arStartCall();
+  else if (arCallState==='active') arEndCall();
 }
 
 async function arStartCall() {
-  setARCallState('connecting');
-  showError('');
+  arCallState='connecting'; syncARBtn(); showError('');
   try {
-    if (typeof LivekitClient === 'undefined') throw new Error('LiveKit SDK not loaded.');
-    const room  = 'ar-' + Math.random().toString(36).slice(2, 9);
-    const token = await arMakeParticipantToken(room);
-    arLkRoom = new LivekitClient.Room({ adaptiveStream: true, dynacast: true });
-    arLkRoom.on(LivekitClient.RoomEvent.Disconnected, () => { setARCallState('idle'); });
-    arLkRoom.on(LivekitClient.RoomEvent.TrackSubscribed, (track, _pub, participant) => {
-      if (track.kind === LivekitClient.Track.Kind.Audio) {
-        const el = track.attach();
-        el.dataset.lkParticipant = 'ar-' + participant.sid;
-        document.body.appendChild(el);
+    if (typeof LivekitClient==='undefined') throw new Error('LiveKit SDK not loaded.');
+    const room='ar-'+Math.random().toString(36).slice(2,9);
+    const token=await makeParticipantToken(room,AR_LK_API_KEY,AR_LK_API_SECRET);
+    arLkRoom=new LivekitClient.Room({adaptiveStream:true,dynacast:true});
+    arLkRoom.on(LivekitClient.RoomEvent.Disconnected,()=>{ arCallState='idle'; syncARBtn(); hideCallModal(); });
+    arLkRoom.on(LivekitClient.RoomEvent.TrackSubscribed,(track,_pub,p)=>{
+      if (track.kind===LivekitClient.Track.Kind.Audio) {
+        const el=track.attach(); el.dataset.lkParticipant='ar-'+p.sid; document.body.appendChild(el);
       }
     });
-    arLkRoom.on(LivekitClient.RoomEvent.TrackUnsubscribed, track => { track.detach().forEach(el => el.remove()); });
-    arLkRoom.on(LivekitClient.RoomEvent.ActiveSpeakersChanged, spk => {
-      if (activeTab === 'ar') updateAudioBars(spk.some(p => p !== arLkRoom.localParticipant));
+    arLkRoom.on(LivekitClient.RoomEvent.TrackUnsubscribed,track=>track.detach().forEach(el=>el.remove()));
+    arLkRoom.on(LivekitClient.RoomEvent.ActiveSpeakersChanged,spk=>{
+      if (activeTab==='ar') updateAudioBars(spk.some(p=>p!==arLkRoom.localParticipant));
     });
-    await arLkRoom.connect(AR_LK_WS_URL, token);
-    if (typeof arLkRoom.registerTextStreamHandler === 'function') {
-      arLkRoom.registerTextStreamHandler('lk.transcription', async (reader, participantInfo) => {
-        const attrs   = (reader.info && reader.info.attributes) ? reader.info.attributes : {};
-        const segId   = attrs['lk.segment_id'];
-        const isFinal = attrs['lk.transcription_final'] !== 'false';
-        const isAgent = participantInfo.identity !== arLkRoom.localParticipant.identity;
-        if (!segId && !isFinal) return;
-        const stableId = segId || ('ar-ts-' + Date.now());
-        try { const text = await reader.readAll(); arUpdateTranscriptEl(stableId, text, isAgent, isFinal); } catch(e) {}
+    await arLkRoom.connect(AR_LK_WS_URL,token);
+    if (typeof arLkRoom.registerTextStreamHandler==='function') {
+      arLkRoom.registerTextStreamHandler('lk.transcription',async(reader,pInfo)=>{
+        const attrs=(reader.info&&reader.info.attributes)||{};
+        const segId=attrs['lk.segment_id'], isFinal=attrs['lk.transcription_final']!=='false';
+        const isAgent=pInfo.identity!==arLkRoom.localParticipant.identity;
+        if (!segId&&!isFinal) return;
+        try { const text=await reader.readAll(); arUpdateTranscript(segId||('ar-'+Date.now()),text,isAgent,isFinal); } catch(e){}
       });
     }
-    await arDispatchAgent(room);
+    await dispatchAgent(room,AR_LK_WS_URL,AR_LK_API_KEY,AR_LK_API_SECRET,AR_AGENT_NAME);
     await arLkRoom.startAudio();
     await arLkRoom.localParticipant.setMicrophoneEnabled(true);
-    setARCallState('active');
-  } catch(err) {
-    dbg('[AR] ERROR: ' + (err.message || err));
-    setARCallState('idle');
-    showError(err.message || 'AR connection failed');
-  }
+    arCallState='active'; syncARBtn();
+    showCallModal('INV Collections','Outbound · AR Collections');
+  } catch(err) { dbg('[AR] ERROR: '+(err.message||err)); arCallState='idle'; syncARBtn(); showError(err.message||'AR failed'); }
 }
 
 async function arEndCall() {
-  if (arLkRoom) { await arLkRoom.disconnect(); arLkRoom = null; }
-  document.querySelectorAll('audio[data-lk-participant^="ar-"]').forEach(el => el.remove());
-  arActiveTranscripts.forEach(el => el.classList.add('tx-done'));
-  arActiveTranscripts.clear();
-  setARCallState('idle');
-}
-
-function setARCallState(state) {
-  arCallState = state;
-  if (activeTab !== 'ar') return;
-  const btn   = document.getElementById('call-btn');
-  const icon  = document.getElementById('call-icon');
-  const label = document.getElementById('call-label');
-  const rst   = document.getElementById('reset-btn');
-  if (state === 'idle') {
-    btn.className     = 'call-btn'; btn.disabled = false;
-    icon.textContent  = '📞'; label.textContent = 'Call Aria';
-    rst.style.display = arHasCallMade ? 'block' : 'none';
-    updateAudioBars(false);
-  } else if (state === 'connecting') {
-    btn.className     = 'call-btn connecting'; btn.disabled = true;
-    icon.textContent  = '⏳'; label.textContent = 'Connecting...';
-    rst.style.display = 'none';
-  } else if (state === 'active') {
-    btn.className    = 'call-btn active'; btn.disabled = false;
-    icon.innerHTML   = `<div class="audio-bars" id="audio-bars">${[.35,.55,.7,.45,.6].map((d,i) =>
-      `<div class="audio-bar" style="--dur:${d}s;height:3px" id="ab${i}"></div>`).join('')}</div>`;
-    label.textContent = 'End Call'; rst.style.display = 'none';
-  }
+  if (arLkRoom) { await arLkRoom.disconnect(); arLkRoom=null; }
+  document.querySelectorAll('audio[data-lk-participant^="ar-"]').forEach(el=>el.remove());
+  arTranscripts.forEach(el=>el.classList.add('tx-done')); arTranscripts.clear();
+  arCallState='idle'; syncARBtn(); hideCallModal();
+  if (arHasCallMade) document.getElementById('reset-btn').style.display='flex';
 }
 
 async function resetARDemo() {
   await Promise.all([
-    db.from('ar_accounts').update({status:'pending_call', call_status:'not_called', payment_date:null}).eq('is_demo_row', true),
-    db.from('ar_feed').delete().eq('is_demo_row', true)
+    db.from('ar_accounts').update({status:'pending_call',call_status:'not_called',payment_date:null}).eq('is_demo_row',true),
+    db.from('ar_feed').delete().eq('is_demo_row',true)
   ]);
-  arHasCallMade = false;
-  document.getElementById('reset-btn').style.display = 'none';
-  await loadARData();
+  arHasCallMade=false; document.getElementById('reset-btn').style.display='none'; await loadARData();
 }
 
 // ── Init ──────────────────────────────────────────────────────
