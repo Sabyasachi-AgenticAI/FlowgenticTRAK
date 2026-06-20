@@ -1,0 +1,47 @@
+/* Aria Design System — Typography tokens
+ * Plus Jakarta Sans (UI) + JetBrains Mono (numerics/codes).
+ * Dashboard base is 14px — dense-but-readable SaaS.
+ */
+:root {
+  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* Size scale */
+  --text-2xs: 11px;  /* micro labels, table sub-text */
+  --text-xs:  12px;  /* eyebrows, badges, meta */
+  --text-sm:  13px;  /* secondary UI text */
+  --text-base:14px;  /* body / default UI */
+  --text-md:  15px;  /* emphasized body */
+  --text-lg:  18px;  /* card titles */
+  --text-xl:  22px;  /* section headings */
+  --text-2xl: 28px;  /* page titles */
+  --text-3xl: 36px;  /* big metrics */
+  --text-4xl: 48px;  /* hero metrics */
+
+  /* Weights */
+  --weight-regular: 400;
+  --weight-medium:  500;
+  --weight-semibold:600;
+  --weight-bold:    700;
+  --weight-extra:   800;
+
+  /* Line heights */
+  --leading-tight:  1.15;
+  --leading-snug:   1.3;
+  --leading-normal: 1.5;
+  --leading-relaxed:1.65;
+
+  /* Letter spacing */
+  --tracking-tight:  -0.02em;
+  --tracking-normal: 0;
+  --tracking-wide:   0.02em;
+  --tracking-eyebrow:0.08em; /* uppercase eyebrows / metric labels */
+
+  /* ---- Semantic type roles ---- */
+  --type-eyebrow-size: var(--text-xs);
+  --type-eyebrow-weight: var(--weight-bold);
+  --type-eyebrow-tracking: var(--tracking-eyebrow);
+
+  --type-metric-font: var(--font-mono);
+  --type-metric-weight: var(--weight-bold);
+}

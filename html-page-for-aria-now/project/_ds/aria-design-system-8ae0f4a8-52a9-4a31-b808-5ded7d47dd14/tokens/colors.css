@@ -1,0 +1,101 @@
+/* Aria Design System — Color tokens
+ * Light SaaS UI · amber brand on a cool slate neutral system.
+ * Base palette (raw scales) + semantic aliases (use the aliases in components).
+ */
+:root {
+  /* ---- Brand: Amber (the ⚡ energy) ---- */
+  --amber-50:  #FFFBEB;
+  --amber-100: #FEF3C7;
+  --amber-200: #FDE68A;
+  --amber-300: #FCD34D;
+  --amber-400: #FBBF24;
+  --amber-500: #F59E0B; /* brand */
+  --amber-600: #D97706;
+  --amber-700: #B45309;
+
+  /* ---- Neutrals: Slate (cool gray) ---- */
+  --slate-50:  #F8FAFC;
+  --slate-100: #F1F5F9;
+  --slate-200: #E2E8F0;
+  --slate-300: #CBD5E1;
+  --slate-400: #94A3B8;
+  --slate-500: #64748B;
+  --slate-600: #475569;
+  --slate-700: #334155;
+  --slate-800: #1E293B;
+  --slate-900: #0F172A;
+  --slate-950: #020617;
+
+  /* ---- Semantic hues ---- */
+  --green-50:  #F0FDF4;
+  --green-100: #DCFCE7;
+  --green-500: #16A34A;
+  --green-600: #15803D;
+  --green-700: #166534;
+
+  --red-50:   #FEF2F2;
+  --red-100:  #FEE2E2;
+  --red-500:  #DC2626;
+  --red-600:  #B91C1C;
+  --red-700:  #991B1B;
+
+  --blue-50:  #EFF6FF;
+  --blue-100: #DBEAFE;
+  --blue-500: #2563EB;
+  --blue-600: #1D4ED8;
+  --blue-700: #1E40AF;
+
+  /* ================= Semantic aliases ================= */
+
+  /* Surfaces */
+  --surface-page:    var(--slate-50);   /* app background */
+  --surface-card:    #FFFFFF;            /* panels, cards */
+  --surface-sunken:  var(--slate-100);  /* wells, table headers, feed bg */
+  --surface-hover:   var(--slate-100);
+  --surface-inverse: var(--slate-900);  /* dark chips, tooltips, call bar */
+  --surface-brand:   var(--amber-500);
+  --surface-brand-tint: var(--amber-50);
+
+  /* Borders */
+  --border-subtle: var(--slate-200);
+  --border-strong: var(--slate-300);
+  --border-brand:  var(--amber-500);
+  --border-focus:  var(--amber-500);
+
+  /* Text */
+  --text-primary:   var(--slate-900);
+  --text-secondary: var(--slate-600);
+  --text-muted:     var(--slate-400);
+  --text-inverse:   #FFFFFF;
+  --text-brand:     var(--amber-700);
+  --text-link:      var(--blue-600);
+
+  /* Brand actions */
+  --brand:        var(--amber-500);
+  --brand-hover:  var(--amber-600);
+  --brand-press:  var(--amber-700);
+  --brand-tint:   var(--amber-50);
+  --on-brand:     var(--slate-950); /* text/icon on amber — dark for AA contrast */
+
+  /* Status — fg = strong text/icon, bg = soft fill, border = soft edge */
+  --success-fg: var(--green-600);
+  --success-bg: var(--green-50);
+  --success-solid: var(--green-500);
+
+  --danger-fg: var(--red-600);
+  --danger-bg: var(--red-50);
+  --danger-solid: var(--red-500);
+
+  --warning-fg: var(--amber-700);
+  --warning-bg: var(--amber-50);
+  --warning-solid: var(--amber-500);
+
+  --info-fg: var(--blue-600);
+  --info-bg: var(--blue-50);
+  --info-solid: var(--blue-500);
+
+  /* Live / voice states */
+  --live-pulse:    var(--amber-500);  /* connecting / ringing */
+  --live-active:   var(--green-500);  /* connected, on call */
+  --live-idle:     var(--slate-400);  /* idle */
+}

@@ -29,6 +29,5 @@ Thumbs.db
 
 .vercel
 
-# Design handoff assets (not needed in deployment)
-html-page-for-aria-now/
+# Design handoff zip archives only
 *.zip

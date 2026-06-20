@@ -1,0 +1,9 @@
+/* Aria Design System — Webfonts
+ * NOTE: Fonts are loaded from the Google Fonts CDN rather than self-hosted
+ * binaries. To self-host, drop the .woff2 files in assets/fonts/ and replace
+ * the @import below with local @font-face rules. Flagged to the user.
+ *
+ * Plus Jakarta Sans — UI, headings, body (geometric humanist sans)
+ * JetBrains Mono     — metrics, IDs, timestamps, load numbers (tabular mono)
+ */
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');

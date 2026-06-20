@@ -202,6 +202,7 @@ class CarrierCheckAgent(Agent):
         eta: str,
         status: str = "confirmed",
         notes: str = "",
+        call_summary: str = "",
     ) -> str:
         """Update a carrier's location, ETA, and status in the TMS.
 
@@ -211,14 +212,19 @@ class CarrierCheckAgent(Agent):
             eta: Estimated arrival time (e.g. '2:30 PM Eastern')
             status: One of 'confirmed', 'delayed', or 'issue_raised'
             notes: Optional notes about delays or problems
+            call_summary: One sentence summary of the call for the live dispatch dashboard
         """
         logger.info("Carrier status update — %s: %s, ETA %s (%s)", ref, location, eta, status)
         data: dict = {
             "call_status": "completed",
             "status": status,
+            "last_location": location,
+            "last_eta": eta,
         }
         if notes:
             data["notes"] = notes
+        if call_summary:
+            data["call_summary"] = call_summary
         result = await _supa_patch("carrier_check_loads", {"ref": ref}, data)
         if result:
             return (
