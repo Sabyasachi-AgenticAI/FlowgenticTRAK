@@ -10,6 +10,9 @@ from livekit.agents import (
     Agent,
     AgentServer,
     AgentSession,
+    AudioConfig,
+    BackgroundAudioPlayer,
+    BuiltinAudioClip,
     JobContext,
     JobProcess,
     RunContext,
@@ -162,12 +165,9 @@ class LoadTenderAgent(Agent):
 # PERSONA 2 — Track & Trace / Carrier Check (outbound)
 # ══════════════════════════════════════════════════════════════
 class CarrierCheckAgent(Agent):
-    async def on_enter(self) -> None:
-        await self.session.generate_reply()
-
     def __init__(self, driver_meta: dict | None = None) -> None:
         meta = driver_meta or {}
-        driver_name = meta.get("driver_name", "the driver")
+        self.driver_name = meta.get("driver_name", "the driver")
         ref = meta.get("ref", "your load")
         route = meta.get("route", "")
         gps_idle_mins = int(meta.get("gps_idle_mins", 30))
@@ -192,7 +192,7 @@ class CarrierCheckAgent(Agent):
         super().__init__(
             instructions=textwrap.dedent(f"""\
                 You are Aria, an AI logistics assistant for Saturn Freight Systems.
-                You are making an outbound check-in call to {driver_name} about load {ref} ({route}).
+                You are making an outbound check-in call to {self.driver_name} about load {ref} ({route}).
 
                 # Why you are calling
                 {situation}
@@ -213,33 +213,40 @@ class CarrierCheckAgent(Agent):
                 - Never start two consecutive replies the same way.
 
                 # Call flow
-                1. Open with ONLY: "Hi, is this {driver_name}?" — then stop and wait for them to reply.
+                1. Open with ONLY: "Hi, is this {self.driver_name}?" — stop and wait for their reply.
                    Do NOT say anything else until they respond.
-                2. Once they confirm: say "Hi, I'm calling from Saturn Freight Systems about load {ref}."
-                   Then immediately state WHY you're calling in one sentence (use the situation above).
+                2. Once confirmed: "Hi, I'm calling from Saturn Freight Systems about load {ref}."
+                   Then immediately state WHY in one sentence (draw from the situation above).
                 3. Listen and ask follow-up questions based on what they tell you.
                 4. Collect: current location, ETA or situation status, any issues.
-                5. Call update_carrier_status once you have the needed information.
-                6. After the tool returns success, say a warm goodbye:
-                   "Perfect — I've got everything noted. <break time="300ms"/>
-                   You take care out there {driver_name}, and give us a call if anything changes. Goodbye!"
-                7. Stay silent after the goodbye — the session will end automatically.
+                5. Call update_carrier_status once you have all needed information.
+                   ALWAYS populate call_summary with a one-sentence recap of the call outcome.
+                6. Do NOT say goodbye — it plays automatically after the tool succeeds. Stay silent.
 
                 # Guardrails
                 - Ask one question at a time.
-                - If no answer, note it professionally and end the call.
-                - Once update_carrier_status succeeds and goodbye is said, do not speak again.
+                - If no answer after a reasonable wait, note it and call update_carrier_status anyway.
+                - Do not speak after calling update_carrier_status.
             """),
         )
 
-    async def _close_after_goodbye(self) -> None:
-        """Wait for TTS to finish the goodbye, then close the session."""
-        await asyncio.sleep(12)
+    async def on_enter(self) -> None:
+        await self.session.generate_reply()
+
+    async def _say_goodbye_and_close(self, context: RunContext) -> None:
+        """Say goodbye via direct TTS, wait for full playout, then close the session."""
         try:
-            if self.session:
-                await self.session.aclose()
-        except Exception:
-            pass
+            farewell = context.session.say(
+                f"Perfect — I've got everything noted. "
+                f"You take care out there {self.driver_name}, "
+                f"and give us a call if anything changes. Goodbye!",
+                allow_interruptions=False,
+            )
+            await farewell.wait_for_playout()
+            await asyncio.sleep(0.5)
+            await context.session.aclose()
+        except Exception as e:
+            logger.warning("Goodbye/close error: %s", e)
 
     @function_tool
     async def get_active_loads(self, context: RunContext) -> str:
@@ -266,19 +273,20 @@ class CarrierCheckAgent(Agent):
         ref: str,
         location: str,
         eta: str,
+        call_summary: str,
         status: str = "confirmed",
         notes: str = "",
-        call_summary: str = "",
     ) -> str:
-        """Update a carrier's location, ETA, and status in the TMS.
+        """Update carrier location, ETA, and status. Call once all details are collected.
+        The call ends automatically after this tool — do NOT speak again.
 
         Args:
             ref: Load reference number
-            location: Driver's current location, city and state
+            location: Driver's current location (city and state)
             eta: Estimated arrival time (e.g. '2:30 PM Eastern')
+            call_summary: One-sentence recap of the call outcome for the dispatch dashboard (REQUIRED)
             status: One of 'confirmed', 'delayed', or 'issue_raised'
             notes: Optional notes about delays or problems
-            call_summary: One sentence summary of the call for the live dispatch dashboard
         """
         logger.info("Carrier status update — %s: %s, ETA %s (%s)", ref, location, eta, status)
         data: dict = {
@@ -286,19 +294,14 @@ class CarrierCheckAgent(Agent):
             "status": status,
             "last_location": location,
             "last_eta": eta,
+            "call_summary": call_summary,
         }
         if notes:
             data["notes"] = notes
-        if call_summary:
-            data["call_summary"] = call_summary
         result = await _supa_patch("carrier_check_loads", {"ref": ref}, data)
         if result:
-            asyncio.create_task(self._close_after_goodbye())
-            return (
-                f"Updated. Load {ref} is {status}. "
-                f"Driver is at {location}, ETA {eta}. "
-                f"Please say your warm goodbye now."
-            )
+            asyncio.create_task(self._say_goodbye_and_close(context))
+            return "Status updated successfully. Goodbye is playing now — do not speak again."
         return f"I couldn't find load {ref}. Could you read back the reference number?"
 
 
@@ -429,12 +432,13 @@ class ARCollectionsAgent(Agent):
         return f"I couldn't find invoice {invoice_no} in our system."
 
 
-# ── Persona factory ──────────────────────────────────────────
+# ── Persona factory ───────────────────────────────────────────
 _PERSONA_MAP: dict[str, type[Agent]] = {
     "load_tender": LoadTenderAgent,
     "carrier_check": CarrierCheckAgent,
     "ar_collections": ARCollectionsAgent,
 }
+
 
 def _resolve_dispatch(room_name: str, metadata_str: str | None) -> tuple[str, dict]:
     """Determine use case and extract driver metadata from dispatch."""
@@ -489,19 +493,31 @@ async def my_agent(ctx: JobContext):
         agent = _PERSONA_MAP[use_case]()
     logger.info("Starting session with %s", type(agent).__name__)
 
-    await session.start(
-        agent=agent,
-        room=ctx.room,
-        room_options=room_io.RoomOptions(
-            audio_input=room_io.AudioInputOptions(
-                noise_cancellation=ai_coustics.audio_enhancement(
-                    model=ai_coustics.EnhancerModel.QUAIL_VF_S
-                ),
-            ),
-        ),
+    # Office ambience loops throughout; keyboard typing plays while Aria thinks
+    background_audio = BackgroundAudioPlayer(
+        ambient_sound=AudioConfig(BuiltinAudioClip.OFFICE_AMBIENCE, volume=0.6),
+        thinking_sound=[
+            AudioConfig(BuiltinAudioClip.KEYBOARD_TYPING, volume=0.5, probability=0.7),
+            AudioConfig(BuiltinAudioClip.KEYBOARD_TYPING2, volume=0.4, probability=0.3),
+        ],
     )
 
+    session_task = asyncio.create_task(
+        session.start(
+            agent=agent,
+            room=ctx.room,
+            room_options=room_io.RoomOptions(
+                audio_input=room_io.AudioInputOptions(
+                    noise_cancellation=ai_coustics.audio_enhancement(
+                        model=ai_coustics.EnhancerModel.QUAIL_VF_S
+                    ),
+                ),
+            ),
+        )
+    )
+    await background_audio.start(room=ctx.room, agent_session=session)
     await ctx.connect()
+    await session_task
 
 
 if __name__ == "__main__":
