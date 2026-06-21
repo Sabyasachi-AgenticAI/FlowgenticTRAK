@@ -215,7 +215,7 @@ class CarrierCheckAgent(Agent):
                 - Never start two consecutive replies the same way.
 
                 # Call flow
-                1. Greet: "Hi, is this {driver_name}? This is Aria from Saturn Freight Systems."
+                1. Greet: "Hi, is this {driver_name}?" — pause and wait for them to confirm — then say "This is Aria from Saturn Freight Systems."
                 2. Immediately state WHY: mention the GPS idle time and any alert context.
                 3. Listen and ask follow-up questions based on what they tell you.
                 4. Collect: current location, ETA or situation status, any issues.

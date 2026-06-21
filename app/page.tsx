@@ -336,16 +336,19 @@ function renderCCLoads(){
     const callSt=done?'completed':active?'in_progress':'not_called',st=done?'confirmed':'pending_check'
     const isBreakdown=c.alertType==='driver_initiated_vehicle_breakdown'
     const rowCls=done?' row-highlight':(!active&&isBreakdown?' cc-alert-row':'')
+    const dbRow=ccLoads.find(l=>l.ref===c.load)
+    const phone=dbRow?.driver_phone||''
+    const summary=done&&dbRow?.call_summary?dbRow.call_summary:''
     const statusCols=!done&&!active&&isBreakdown
       ?`<div><span class="chip chip-danger"><span class="chip-dot"></span>Driver Initiated Alert</span></div><div><span class="chip chip-danger"><span class="chip-dot"></span>Vehicle Breakdown</span></div>`
-      :`<div>${callStatusChip(callSt)}</div><div>${statusChip(st)}</div>`
-    html+=`<div class="table-row cc-cols${rowCls}"><div><div class="cell-primary">${c.name}</div><div class="cell-ref">${c.load}</div></div><div class="cell-muted" style="font-size:var(--text-xs)">${c.route}</div><div class="cell-muted">${c.pickup}</div>${statusCols}</div>`
+      :`<div>${callStatusChip(callSt)}</div><div>${statusChip(st)}${summary?`<div class="cell-summary">"${summary}"</div>`:''}</div>`
+    html+=`<div class="table-row cc-cols${rowCls}"><div><div class="cell-primary">${c.name}</div><div class="cell-ref">${c.load}</div>${phone?`<div class="cell-phone">${phone}</div>`:''}</div><div class="cell-muted" style="font-size:var(--text-xs)">${c.route}</div><div class="cell-muted">${c.pickup}</div>${statusCols}</div>`
   })
   otherLoads.forEach(l=>{
-    html+=`<div class="table-row cc-cols${l.status==='confirmed'?' row-highlight':''}"><div><div class="cell-primary">${l.driver_name||l.carrier}</div><div class="cell-ref">${l.ref}</div></div><div class="cell-muted" style="font-size:var(--text-xs)">${l.route||(l.origin+' → '+l.destination)}</div><div class="cell-muted">${l.pickup_time}</div><div>${callStatusChip(l.call_status)}</div><div>${statusChip(l.status)}</div></div>`
+    html+=`<div class="table-row cc-cols${l.status==='confirmed'?' row-highlight':''}"><div><div class="cell-primary">${l.driver_name||l.carrier}</div><div class="cell-ref">${l.ref}</div>${l.driver_phone?`<div class="cell-phone">${l.driver_phone}</div>`:''}</div><div class="cell-muted" style="font-size:var(--text-xs)">${l.route||(l.origin+' → '+l.destination)}</div><div class="cell-muted">${l.pickup_time}</div><div>${callStatusChip(l.call_status)}</div><div>${statusChip(l.status)}${l.call_summary?`<div class="cell-summary">"${l.call_summary}"</div>`:''}</div></div>`
   })
   html+=`<div class="cc-alert-sep"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 2L1.5 13.5h13L8 2z"/><path d="M8 7v3.5M8 12.5v.5" stroke-linecap="round"/></svg>Driver Alerts — Immediate Action Required</div>`
-  html+=`<div class="table-row cc-cols cc-warn-row"><div><div class="cell-primary">Tony Rivera</div><div class="cell-ref">CC-051</div></div><div class="cell-muted" style="font-size:var(--text-xs)">Houston TX → Baton Rouge LA</div><div class="cell-muted">Jun 21, 06:00 CT</div><div><span class="chip chip-warning"><span class="chip-dot"></span>Driver Initiated Alert</span></div><div><span class="chip chip-warning"><span class="chip-dot"></span>Load Not Staged · 2h+</span></div></div>`
+  html+=`<div class="table-row cc-cols cc-warn-row"><div><div class="cell-primary">Tony Rivera</div><div class="cell-ref">CC-051</div><div class="cell-phone">+1-555-0721</div></div><div class="cell-muted" style="font-size:var(--text-xs)">Houston TX → Baton Rouge LA</div><div class="cell-muted">Jun 21, 06:00 CT</div><div><span class="chip chip-warning"><span class="chip-dot"></span>Driver Initiated Alert</span></div><div><span class="chip chip-warning"><span class="chip-dot"></span>Load Not Staged · 2h+</span></div></div>`
   body.innerHTML=html
 }
 async function loadCCData(){
@@ -734,7 +737,7 @@ export default function Page() {
                 </svg>
                 Initialize Use Case
               </button>
-              <span style={{fontSize:'var(--text-xs)',color:'var(--text-muted)'}}>Auto-dials Marcus Webb → Sandra Patel</span>
+              <span style={{fontSize:'var(--text-xs)',color:'var(--text-muted)'}}>Auto-dials Marcus → Sandra → James (3 carriers)</span>
             </div>
             <div className="metrics-row">
               <div className="metric-card">
