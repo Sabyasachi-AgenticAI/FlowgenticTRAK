@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -164,46 +165,81 @@ class CarrierCheckAgent(Agent):
     async def on_enter(self) -> None:
         await self.session.generate_reply()
 
-    def __init__(self) -> None:
+    def __init__(self, driver_meta: dict | None = None) -> None:
+        meta = driver_meta or {}
+        driver_name = meta.get("driver_name", "the driver")
+        ref = meta.get("ref", "your load")
+        route = meta.get("route", "")
+        gps_idle_mins = int(meta.get("gps_idle_mins", 30))
+        alert_type = str(meta.get("alert_type", "gps_idle"))
+
+        if "breakdown" in alert_type or "vehicle" in alert_type:
+            situation = (
+                f"GPS has been idle for {gps_idle_mins} minutes AND "
+                f"a driver-initiated VEHICLE BREAKDOWN alert was received. This is a priority call."
+            )
+            opening = (
+                f"Ask about their safety first, then the vehicle condition, "
+                f"then whether roadside assistance is needed."
+            )
+        else:
+            situation = (
+                f"GPS tracking shows the truck has been stationary for {gps_idle_mins} minutes "
+                f"with no movement logged."
+            )
+            opening = f"Check their status, confirm current location, and get an updated ETA."
+
         super().__init__(
-            instructions=textwrap.dedent("""\
+            instructions=textwrap.dedent(f"""\
                 You are Aria, an AI logistics assistant for Saturn Freight Systems.
-                You make outbound check-in calls to drivers who have active loads.
+                You are making an outbound check-in call to {driver_name} about load {ref} ({route}).
+
+                # Why you are calling
+                {situation}
+                {opening}
 
                 # Output rules
-                You are on a live phone call. Drivers may be driving — keep it crisp.
+                You are on a live phone call. Drivers may be in difficult situations — be clear and concise.
                 - Plain spoken English only. No markdown, lists, or formatting.
                 - One question at a time. Maximum two sentences per turn.
                 - Spell out reference numbers digit by digit.
                 - Say times naturally (e.g. "two-thirty P M Central").
 
                 # Voice naturalness
-                Sound like a real human dispatcher doing a quick check-in, not a robot.
-                - Vary openers every turn: "Got it.", "Perfect.", "Okay —", "Sounds good.", "Right."
-                - Natural pauses: "Alright, <break time="200ms"/> so — what's your current location?"
-                - Warm but brief: "I'll get that updated right now, <break time="200ms"/> just one second."
-                - If delayed: "No worries at all — I'll flag that for the team."
-                - Never start two consecutive replies with the same word.
-                - Close warmly: "Thanks for the update — safe travels out there."
-
-                # Objective
-                Confirm the driver's current location and ETA, note any issues, and update the TMS.
+                Sound like a real human dispatcher doing a concerned check-in, not a robot.
+                - Open: "Hi, is this {driver_name}? <break time="200ms"/> This is Aria from Saturn Freight."
+                - State WHY you're calling immediately after greeting.
+                - Vary acknowledgments: "Got it.", "Okay.", "I see.", "Right.", "Understood."
+                - Natural pauses: "Alright, <break time="200ms"/> let me note that down."
+                - If serious: "I completely understand, <break time="200ms"/> let's get you sorted."
+                - Never start two consecutive replies the same way.
 
                 # Call flow
-                1. Open: "Hi, this is Aria calling from Saturn Freight Systems —
-                   am I speaking with [driver name]?"
-                2. Confirm the load reference number.
-                3. Ask for their current location.
-                4. Ask for their estimated arrival time at the destination.
-                5. Ask if there are any delays or issues to flag.
-                6. Call update_carrier_status to record the update.
-                7. Thank them and close warmly. Keep the total call under 90 seconds.
+                1. Greet: "Hi, is this {driver_name}? This is Aria from Saturn Freight Systems."
+                2. Immediately state WHY: mention the GPS idle time and any alert context.
+                3. Listen and ask follow-up questions based on what they tell you.
+                4. Collect: current location, ETA or situation status, any issues.
+                5. Call update_carrier_status once you have the needed information.
+                6. After the tool returns success, say a warm goodbye:
+                   "Perfect — I've got everything logged. <break time="300ms"/>
+                   You take care out there {driver_name}, and call us if anything changes. Goodbye!"
+                7. Stay silent after the goodbye — the session will end automatically.
 
                 # Guardrails
-                - If the driver is unavailable, note it politely and end the call.
                 - Ask one question at a time.
+                - If no answer, note it professionally and end the call.
+                - Once update_carrier_status succeeds and goodbye is said, do not speak again.
             """),
         )
+
+    async def _close_after_goodbye(self) -> None:
+        """Wait for TTS to finish the goodbye, then close the session."""
+        await asyncio.sleep(12)
+        try:
+            if self.session:
+                await self.session.aclose()
+        except Exception:
+            pass
 
     @function_tool
     async def get_active_loads(self, context: RunContext) -> str:
@@ -257,9 +293,11 @@ class CarrierCheckAgent(Agent):
             data["call_summary"] = call_summary
         result = await _supa_patch("carrier_check_loads", {"ref": ref}, data)
         if result:
+            asyncio.create_task(self._close_after_goodbye())
             return (
                 f"Updated. Load {ref} is {status}. "
-                f"Driver is at {location}, ETA {eta}. Thank you."
+                f"Driver is at {location}, ETA {eta}. "
+                f"Please say your warm goodbye now."
             )
         return f"I couldn't find load {ref}. Could you read back the reference number?"
 
@@ -398,19 +436,21 @@ _PERSONA_MAP: dict[str, type[Agent]] = {
     "ar_collections": ARCollectionsAgent,
 }
 
-def _resolve_use_case(room_name: str, metadata_str: str | None) -> str:
-    """Determine use case from dispatch metadata sent by the dashboard button click."""
+def _resolve_dispatch(room_name: str, metadata_str: str | None) -> tuple[str, dict]:
+    """Determine use case and extract driver metadata from dispatch."""
+    driver_meta: dict = {}
     if metadata_str:
         try:
-            use_case = json.loads(metadata_str).get("use_case")
+            parsed = json.loads(metadata_str)
+            use_case = parsed.get("use_case", "")
+            driver_meta = {k: v for k, v in parsed.items() if k != "use_case"}
             if use_case and use_case in _PERSONA_MAP:
-                return use_case
+                return use_case, driver_meta
         except (json.JSONDecodeError, AttributeError):
             pass
-    # Fallback: infer from room name prefix (lt- / cc- / ar-)
     prefix_map = {"lt": "load_tender", "crew": "load_tender", "cc": "carrier_check", "ar": "ar_collections"}
     prefix = room_name.split("-")[0] if room_name else "lt"
-    return prefix_map.get(prefix, "load_tender")
+    return prefix_map.get(prefix, "load_tender"), driver_meta
 
 
 # ── Agent server setup ────────────────────────────────────────
@@ -429,8 +469,8 @@ async def my_agent(ctx: JobContext):
     ctx.log_context_fields = {"room": ctx.room.name}
 
     metadata_str = getattr(getattr(ctx, "job", None), "metadata", None)
-    use_case = _resolve_use_case(ctx.room.name, metadata_str)
-    logger.info("Room %s → use_case=%s", ctx.room.name, use_case)
+    use_case, driver_meta = _resolve_dispatch(ctx.room.name, metadata_str)
+    logger.info("Room %s → use_case=%s driver=%s", ctx.room.name, use_case, driver_meta.get("driver_name"))
 
     session = AgentSession(
         llm=inference.LLM(model="openai/gpt-4o-mini"),
@@ -444,7 +484,10 @@ async def my_agent(ctx: JobContext):
         preemptive_generation=True,
     )
 
-    agent = _PERSONA_MAP[use_case]()
+    if use_case == "carrier_check":
+        agent = CarrierCheckAgent(driver_meta=driver_meta)
+    else:
+        agent = _PERSONA_MAP[use_case]()
     logger.info("Starting session with %s", type(agent).__name__)
 
     await session.start(

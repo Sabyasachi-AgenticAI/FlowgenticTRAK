@@ -810,17 +810,17 @@ async function makeAdminToken(room,apiKey,apiSecret) {
   const now=Math.floor(Date.now()/1000);
   return signJWT({iss:apiKey,exp:now+300,nbf:now,video:{room,roomCreate:true,roomAdmin:true}},apiSecret);
 }
-async function dispatchAgent(room,wsUrl,apiKey,apiSecret,agentName,useCase) {
+async function dispatchAgent(room,wsUrl,apiKey,apiSecret,agentName,metadata) {
   try {
     const tok=await makeAdminToken(room,apiKey,apiSecret);
     const httpUrl=wsUrl.replace('wss://','https://');
     const body={room,agentName};
-    if (useCase) body.metadata=JSON.stringify({use_case:useCase});
+    if (metadata) body.metadata=JSON.stringify(metadata);
     const res=await fetch(`${httpUrl}/twirp/livekit.AgentDispatchService/CreateDispatch`,
       {method:'POST',headers:{'Authorization':'Bearer '+tok,'Content-Type':'application/json'},
        body:JSON.stringify(body)});
     if (!res.ok) dbg('Dispatch error '+res.status);
-    else dbg('Dispatch OK — '+agentName+' · persona: '+(useCase||'default'));
+    else dbg('Dispatch OK — '+agentName+' · '+(metadata?.use_case||'default')+(metadata?.driver_name?' · '+metadata.driver_name:''));
   } catch(e) { dbg('Dispatch failed: '+e.message); }
 }
 
@@ -890,7 +890,7 @@ async function startCall() {
         try { const text=await reader.readAll(); updateTranscriptEl(id,text,isAgent,true,'feed-lt'); } catch(e){}
       });
     }
-    await dispatchAgent(room,LK_WS_URL,LK_API_KEY,LK_API_SECRET,AGENT_NAME,'load_tender');
+    await dispatchAgent(room,LK_WS_URL,LK_API_KEY,LK_API_SECRET,AGENT_NAME,{use_case:'load_tender'});
     await lkRoom.startAudio();
     await lkRoom.localParticipant.setMicrophoneEnabled(true);
     callState='active'; setTopbarCallState('active');
@@ -1029,44 +1029,59 @@ function showError(msg) {
 // room prefix 'cc-' tells the agent to load the CarrierCheckAgent
 // ══════════════════════════════════════════════════════════════
 let ccLoads=[], ccHasCallMade=false, ccLkRoom=null, ccCallState='idle';
-const ccTranscripts=new Map();
+const ccTranscripts=new Map(), ccDialerTxMap=new Map();
 let ccAutoRunning=false, ccDialerInt=null, ccDialerSecs=0;
+let ccDoneSet=new Set(), ccCountdownInt=null;
 
-// Demo carrier sequence for Initialize Use Case
+// Demo carrier sequence — refs match carrier_check_loads.ref in Supabase
 const CC_DEMO_CARRIERS=[
-  {name:'Marcus Webb', initial:'M', load:'CC-047', route:'Dallas TX → Memphis TN', pickup:'Jun 21, 09:00 CT'},
-  {name:'Sandra Patel', initial:'S', load:'CC-052', route:'Ft. Worth TX → Nashville TN', pickup:'Jun 21, 10:30 CT'},
+  {name:'Marcus Webb', initial:'M', load:'REF-29472', route:'MIA → LAX', pickup:'Jun 21, 07:00 CT',
+   gpsIdleMins:97, alertType:'gps_idle'},
+  {name:'Sandra Patel', initial:'S', load:'REF-29471', route:'LAX → ORD', pickup:'Jun 21, 08:00 CT',
+   gpsIdleMins:35, alertType:'gps_idle'},
+  {name:'James Carter', initial:'J', load:'CC-038', route:'ATL → CLT', pickup:'Jun 21, 07:00 CT',
+   gpsIdleMins:120, alertType:'driver_initiated_vehicle_breakdown'},
 ];
-let ccDemoIdx=-1, ccDemoAdvTimer=null;
+let ccDemoIdx=-1;
 
 function renderCCLoads() {
-  const confirmed=ccLoads.filter(l=>l.status==='confirmed').length;
-  const pending  =ccLoads.filter(l=>l.status==='pending_check').length;
-  document.getElementById('cc-k2').textContent=confirmed;
-  document.getElementById('cc-k3').textContent=pending;
-  document.getElementById('cc-count').textContent=(ccLoads.length+4)+' carriers';
+  const demRefs=new Set(CC_DEMO_CARRIERS.map(c=>c.load));
+  const otherLoads=ccLoads.filter(l=>!demRefs.has(l.ref));
+  const doneCount=ccDoneSet.size;
+  const pendingCount=CC_DEMO_CARRIERS.filter((_,i)=>!ccDoneSet.has(i)).length+otherLoads.filter(l=>l.status==='pending_check').length;
+  document.getElementById('cc-k2').textContent=doneCount+otherLoads.filter(l=>l.status==='confirmed').length;
+  document.getElementById('cc-k3').textContent=pendingCount;
+  document.getElementById('cc-count').textContent=(CC_DEMO_CARRIERS.length+otherLoads.length+1)+' carriers';
   const body=document.getElementById('cc-table-body');
   let html='';
 
-  // ── Demo sequence rows (Marcus → Sandra) ──
+  // ── Demo sequence rows (Marcus → Sandra → James) ──
   CC_DEMO_CARRIERS.forEach((c,i)=>{
-    const done=ccDemoIdx>i;
-    const active=ccAutoRunning&&ccDemoIdx===i;
+    const done=ccDoneSet.has(i);
+    const active=ccAutoRunning&&ccDemoIdx===i&&!done;
     const callSt=done?'completed':active?'in_progress':'not_called';
     const st=done?'confirmed':'pending_check';
-    html+=`<div class="table-row cc-cols${done?' row-highlight':''}">
+    const isBreakdown=c.alertType==='driver_initiated_vehicle_breakdown';
+    const rowCls=done?' row-highlight':(!active&&isBreakdown?' cc-alert-row':'');
+    let statusCols;
+    if (!done&&!active&&isBreakdown) {
+      statusCols=`<div><span class="chip chip-danger"><span class="chip-dot"></span>Driver Initiated Alert</span></div>
+      <div><span class="chip chip-danger"><span class="chip-dot"></span>Vehicle Breakdown</span></div>`;
+    } else {
+      statusCols=`<div>${callStatusChip(callSt)}</div><div>${statusChip(st)}</div>`;
+    }
+    html+=`<div class="table-row cc-cols${rowCls}">
       <div><div class="cell-primary">${c.name}</div><div class="cell-ref">${c.load}</div></div>
       <div class="cell-muted" style="font-size:var(--text-xs)">${c.route}</div>
       <div class="cell-muted">${c.pickup}</div>
-      <div>${callStatusChip(callSt)}</div>
-      <div>${statusChip(st)}</div>
+      ${statusCols}
     </div>`;
   });
 
-  // ── Regular Supabase rows ──
-  ccLoads.forEach(l=>{
+  // ── Other Supabase rows (excluding demo refs) ──
+  otherLoads.forEach(l=>{
     html+=`<div class="table-row cc-cols${l.status==='confirmed'?' row-highlight':''}">
-      <div><div class="cell-primary">${l.carrier}</div><div class="cell-ref">${l.ref}</div></div>
+      <div><div class="cell-primary">${l.driver_name||l.carrier}</div><div class="cell-ref">${l.ref}</div></div>
       <div class="cell-muted" style="font-size:var(--text-xs)">${l.route||(l.origin+' → '+l.destination)}</div>
       <div class="cell-muted">${l.pickup_time}</div>
       <div>${callStatusChip(l.call_status)}</div>
@@ -1080,16 +1095,7 @@ function renderCCLoads() {
     Driver Alerts — Immediate Action Required
   </div>`;
 
-  // ── James Carter — vehicle breakdown ──
-  html+=`<div class="table-row cc-cols cc-alert-row">
-    <div><div class="cell-primary">James Carter</div><div class="cell-ref">CC-038</div></div>
-    <div class="cell-muted" style="font-size:var(--text-xs)">Atlanta GA → Charlotte NC</div>
-    <div class="cell-muted">Jun 21, 07:00 CT</div>
-    <div><span class="chip chip-danger"><span class="chip-dot"></span>Driver Initiated Alert</span></div>
-    <div><span class="chip chip-danger"><span class="chip-dot"></span>Vehicle Breakdown</span></div>
-  </div>`;
-
-  // ── Tony Rivera — load not staged ──
+  // ── Tony Rivera — load not staged (static alert) ──
   html+=`<div class="table-row cc-cols cc-warn-row">
     <div><div class="cell-primary">Tony Rivera</div><div class="cell-ref">CC-051</div></div>
     <div class="cell-muted" style="font-size:var(--text-xs)">Houston TX → Baton Rouge LA</div>
@@ -1115,6 +1121,21 @@ function ccUpdateTranscript(segId, text, isAgent, isFinal) {
   }
   el.querySelector('.tx-text').textContent=text;
   if (isFinal) { el.classList.add('tx-done'); ccTranscripts.delete(segId); }
+  // Mirror to dialer card live transcript
+  const dialerWrap=document.getElementById('dialerTranscript');
+  if (dialerWrap) {
+    let dlEl=ccDialerTxMap.get(segId);
+    if (!dlEl) {
+      dlEl=document.createElement('div');
+      dlEl.className='dialer-t-line '+(isAgent?'dialer-t-aria':'dialer-t-human');
+      dlEl.innerHTML=`<span class="dialer-t-label">${isAgent?'Aria':'Driver'}:</span><span class="dialer-t-text"></span>`;
+      dialerWrap.appendChild(dlEl);
+      ccDialerTxMap.set(segId,dlEl);
+    }
+    dlEl.querySelector('.dialer-t-text').textContent=text;
+    dialerWrap.scrollTop=dialerWrap.scrollHeight;
+    if (isFinal) ccDialerTxMap.delete(segId);
+  }
 }
 
 async function loadCCData() {
@@ -1131,11 +1152,21 @@ async function loadCCData() {
   if (activeTab==='cc') document.getElementById('feedCount').textContent=feedCounts.cc+' events';
 }
 
+const _ccFeedRefs=new Set();
 function subscribeCCRealtime() {
   db.channel('cc-loads')
     .on('postgres_changes',{event:'*',schema:'public',table:'carrier_check_loads'},p=>{
       if (p.eventType==='INSERT') ccLoads.push(p.new);
-      else if (p.eventType==='UPDATE') { const i=ccLoads.findIndex(l=>l.id===p.new.id); if(i>-1) ccLoads[i]=p.new; }
+      else if (p.eventType==='UPDATE') {
+        const i=ccLoads.findIndex(l=>l.id===p.new.id); if(i>-1) ccLoads[i]=p.new;
+        // Generate feed card when agent writes call summary
+        if (p.new.call_status==='completed'&&p.new.call_summary&&!_ccFeedRefs.has(p.new.ref)) {
+          _ccFeedRefs.add(p.new.ref);
+          const now=new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+          renderCCFeedCard({title:(p.new.driver_name||p.new.carrier)+' — Status Updated',
+            who:'aria',time_str:now,quote:p.new.call_summary,badge_type:'auto',tool:'update_carrier_status'},true);
+        }
+      }
       else if (p.eventType==='DELETE') ccLoads=ccLoads.filter(l=>l.id!==p.old.id);
       ccHasCallMade=ccLoads.some(l=>l.call_status==='completed');
       document.getElementById('cc-k1').textContent=ccLoads.filter(l=>l.call_status==='completed').length;
@@ -1149,10 +1180,11 @@ function subscribeCCRealtime() {
 
 function ccInitializeUseCase() {
   if (ccAutoRunning) { stopCCSequence(); return; }
-  ccDemoIdx=0;
+  ccDemoIdx=0; ccDoneSet=new Set(); _ccFeedRefs.clear();
+  document.getElementById('feed-cc').innerHTML=''; feedCounts.cc=0;
+  if (activeTab==='cc') document.getElementById('feedCount').textContent='0 events';
   updateCCDemoDialer();
-  startCCSequence();
-  scheduleCCDemoAdvance();
+  ccStartCallForCarrier(CC_DEMO_CARRIERS[0]);
 }
 
 function updateCCDemoDialer() {
@@ -1165,71 +1197,33 @@ function updateCCDemoDialer() {
   document.getElementById('dialerTotal').textContent=CC_DEMO_CARRIERS.length;
   const next=CC_DEMO_CARRIERS[ccDemoIdx+1];
   document.getElementById('dialerNext').textContent=next?next.name:'Sequence Complete';
+  document.getElementById('dialerTimer').textContent='0:00';
+  document.getElementById('dialerTranscript').innerHTML='';
+  ccDialerTxMap.clear();
   document.getElementById('liveDialerCard').classList.add('visible');
 }
 
-function scheduleCCDemoAdvance() {
-  clearTimeout(ccDemoAdvTimer); clearInterval(ccDialerInt);
-  ccDialerSecs=0;
-  ccDialerInt=setInterval(()=>{
-    ccDialerSecs++;
-    const m=Math.floor(ccDialerSecs/60), s=ccDialerSecs%60;
-    document.getElementById('dialerTimer').textContent=m+':'+String(s).padStart(2,'0');
-  },1000);
-  ccDemoAdvTimer=setTimeout(()=>{
-    clearInterval(ccDialerInt);
-    const c=CC_DEMO_CARRIERS[ccDemoIdx];
-    if (c) {
-      const now=new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
-      renderCCFeedCard({title:c.name+' — Check-In Complete',who:'aria',time_str:now,
-        quote:'Location and ETA confirmed. Carrier is on track for delivery.',badge_type:'auto',tool:'update_carrier_status'},true);
-      const k1=document.getElementById('cc-k1');
-      k1.textContent=parseInt(k1.textContent||'0')+1;
-    }
-    ccDemoIdx++;
-    renderCCLoads();
-    if (ccDemoIdx<CC_DEMO_CARRIERS.length) {
-      updateCCDemoDialer();
-      scheduleCCDemoAdvance();
-    } else {
-      // Sequence complete
-      document.getElementById('liveDialerCard').classList.remove('visible');
-      ccAutoRunning=false;
-      const btn=document.getElementById('cc-init-btn');
-      if (btn){btn.textContent='Initialize Use Case';btn.classList.remove('running');btn.disabled=false;}
-      if (ccCallState==='active') ccEndCall(); else syncCCBtn();
-      document.getElementById('reset-btn').style.display='flex';
-    }
-  },45000);
-}
-
-function startCCSequence() {
-  if (ccCallState==='idle') ccStartCall();
-}
-function stopCCSequence() {
-  clearTimeout(ccDemoAdvTimer); clearInterval(ccDialerInt);
-  ccDemoIdx=-1;
-  if (ccCallState==='active') ccEndCall();
-  ccAutoRunning=false;
-  const btn=document.getElementById('cc-init-btn');
-  if (btn){btn.innerHTML='<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M6 5.5l5 2.5-5 2.5V5.5z" fill="currentColor" stroke="none"/></svg> Initialize Use Case';btn.classList.remove('running');btn.disabled=false;}
-  document.getElementById('liveDialerCard').classList.remove('visible');
-  renderCCLoads();
-  syncCCBtn();
-}
-
-async function ccStartCall() {
+async function ccStartCallForCarrier(carrier) {
   ccCallState='connecting'; ccAutoRunning=true; syncCCBtn(); showError('');
-  dbg('Starting CC call… (persona: carrier_check)');
+  dbg('CC call → '+carrier.name+' ('+carrier.load+')');
+  const initBtn=document.getElementById('cc-init-btn');
+  if (initBtn){initBtn.innerHTML='<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 3h2v10H5zM9 3h2v10H9z"/></svg> End Sequence';initBtn.classList.add('running');}
   try {
     if (typeof LivekitClient==='undefined') throw new Error('LiveKit SDK not loaded.');
     const room=newRoomName('cc');
     const token=await makeParticipantToken(room,LK_API_KEY,LK_API_SECRET);
-    dbg('Token ready · room: '+room+' (persona: carrier_check)');
+    if (ccLkRoom) { await ccLkRoom.disconnect(); ccLkRoom=null; }
+    ccTranscripts.forEach(el=>el.classList.add('tx-done')); ccTranscripts.clear();
+    ccDialerTxMap.clear();
     ccLkRoom=new LivekitClient.Room({adaptiveStream:true,dynacast:true});
     ccLkRoom.on(LivekitClient.RoomEvent.Disconnected,()=>{
-      ccCallState='idle'; ccAutoRunning=false; syncCCBtn();
-      document.getElementById('liveDialerCard').classList.remove('visible');
+      ccCallState='idle'; clearInterval(ccDialerInt);
+      document.querySelectorAll('audio[data-lk-participant^="cc-"]').forEach(el=>el.remove());
+      if (ccAutoRunning&&ccDemoIdx<CC_DEMO_CARRIERS.length-1) {
+        ccStartCountdownToNext();
+      } else if (ccAutoRunning) {
+        ccSequenceComplete();
+      }
     });
     ccLkRoom.on(LivekitClient.RoomEvent.TrackSubscribed,(track,_pub,p)=>{
       if (track.kind===LivekitClient.Track.Kind.Audio) {
@@ -1240,7 +1234,7 @@ async function ccStartCall() {
     ccLkRoom.on(LivekitClient.RoomEvent.ActiveSpeakersChanged,spk=>{
       if (activeTab==='cc') updateAudioBars(spk.some(p=>p!==ccLkRoom.localParticipant));
     });
-    await ccLkRoom.connect(LK_WS_URL,token); dbg('[CC] Connected');
+    await ccLkRoom.connect(LK_WS_URL,token); dbg('[CC] Connected · '+carrier.name);
     if (typeof ccLkRoom.registerTextStreamHandler==='function') {
       ccLkRoom.registerTextStreamHandler('lk.transcription',async(reader,pInfo)=>{
         const attrs=(reader.info&&reader.info.attributes)||{};
@@ -1254,29 +1248,76 @@ async function ccStartCall() {
         try { const text=await reader.readAll(); ccUpdateTranscript('chat-'+Date.now(),text,isAgent,true); } catch(e){}
       });
     }
-    await dispatchAgent(room,LK_WS_URL,LK_API_KEY,LK_API_SECRET,AGENT_NAME,'carrier_check');
+    const meta={use_case:'carrier_check',driver_name:carrier.name,ref:carrier.load,route:carrier.route,
+      gps_idle_mins:carrier.gpsIdleMins,alert_type:carrier.alertType};
+    await dispatchAgent(room,LK_WS_URL,LK_API_KEY,LK_API_SECRET,AGENT_NAME,meta);
     await ccLkRoom.startAudio();
     await ccLkRoom.localParticipant.setMicrophoneEnabled(true);
     ccCallState='active'; syncCCBtn();
-    // Dialer visibility is managed by demo sequence; only show if no demo running
-    if (ccDemoIdx<0) document.getElementById('liveDialerCard').classList.add('visible');
-    // Update the init button to show running state
-    const initBtn=document.getElementById('cc-init-btn');
-    if (initBtn&&ccDemoIdx>=0){initBtn.innerHTML='<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 3h2v10H5zM9 3h2v10H9z"/></svg> End Sequence';initBtn.classList.add('running');}
-    dbg('[CC] Call live — Aria carrier_check persona active');
-  } catch(err) { dbg('[CC] ERROR: '+(err.message||err)); ccCallState='idle'; ccAutoRunning=false; syncCCBtn(); showError(err.message||'CC call failed'); }
+    clearInterval(ccDialerInt); ccDialerSecs=0;
+    ccDialerInt=setInterval(()=>{
+      ccDialerSecs++;
+      const m=Math.floor(ccDialerSecs/60),s=ccDialerSecs%60;
+      document.getElementById('dialerTimer').textContent=m+':'+String(s).padStart(2,'0');
+    },1000);
+    renderCCLoads();
+    dbg('[CC] Live — '+carrier.name);
+  } catch(err) {
+    dbg('[CC] ERROR: '+(err.message||err)); ccCallState='idle'; ccAutoRunning=false; syncCCBtn();
+    showError(err.message||'CC call failed');
+    const b=document.getElementById('cc-init-btn');
+    if (b){b.innerHTML='<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M6 5.5l5 2.5-5 2.5V5.5z" fill="currentColor" stroke="none"/></svg> Initialize Use Case';b.classList.remove('running');b.disabled=false;}
+  }
 }
 
-async function ccEndCall() {
-  if (ccLkRoom) { await ccLkRoom.disconnect(); ccLkRoom=null; }
+function ccStartCountdownToNext() {
+  ccDoneSet.add(ccDemoIdx); renderCCLoads();
+  const nextCarrier=CC_DEMO_CARRIERS[ccDemoIdx+1];
+  let secs=5;
+  document.getElementById('dialerName').textContent='✓ '+CC_DEMO_CARRIERS[ccDemoIdx].name+' — Complete';
+  document.getElementById('dialerMeta').textContent='Calling '+nextCarrier.name+' in '+secs+'…';
+  document.getElementById('dialerTimer').textContent=secs+'';
+  document.getElementById('dialerTranscript').innerHTML=''; ccDialerTxMap.clear();
+  document.getElementById('liveDialerCard').classList.add('visible');
+  clearInterval(ccCountdownInt);
+  ccCountdownInt=setInterval(()=>{
+    secs--;
+    if (secs>0) {
+      document.getElementById('dialerMeta').textContent='Calling '+nextCarrier.name+' in '+secs+'…';
+      document.getElementById('dialerTimer').textContent=secs+'';
+    } else {
+      clearInterval(ccCountdownInt);
+      ccDemoIdx++; ccDialerSecs=0;
+      updateCCDemoDialer(); renderCCLoads();
+      ccStartCallForCarrier(CC_DEMO_CARRIERS[ccDemoIdx]);
+    }
+  },1000);
+}
+
+function ccSequenceComplete() {
+  ccDoneSet.add(ccDemoIdx); clearInterval(ccDialerInt); clearInterval(ccCountdownInt);
+  ccAutoRunning=false;
+  document.getElementById('dialerName').textContent='✓ Sequence Complete';
+  document.getElementById('dialerMeta').textContent=CC_DEMO_CARRIERS.length+' carriers checked — demo done';
+  document.getElementById('dialerTimer').textContent='—';
+  document.getElementById('dialerNext').textContent='Done';
+  renderCCLoads(); syncCCBtn();
+  const b=document.getElementById('cc-init-btn');
+  if (b){b.innerHTML='<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M6 5.5l5 2.5-5 2.5V5.5z" fill="currentColor" stroke="none"/></svg> Initialize Use Case';b.classList.remove('running');b.disabled=false;}
+  document.getElementById('reset-btn').style.display='flex';
+  setTimeout(()=>document.getElementById('liveDialerCard').classList.remove('visible'),4000);
+}
+
+function stopCCSequence() {
+  clearInterval(ccDialerInt); clearInterval(ccCountdownInt); ccCountdownInt=null;
+  ccDemoIdx=-1; ccDoneSet=new Set(); ccAutoRunning=false; ccCallState='idle';
+  if (ccLkRoom) { ccLkRoom.disconnect(); ccLkRoom=null; }
   document.querySelectorAll('audio[data-lk-participant^="cc-"]').forEach(el=>el.remove());
-  ccTranscripts.forEach(el=>el.classList.add('tx-done')); ccTranscripts.clear();
-  clearTimeout(ccDemoAdvTimer); clearInterval(ccDialerInt);
-  ccAutoRunning=false; ccCallState='idle';
-  const btn=document.getElementById('cc-init-btn');
-  if (btn){btn.innerHTML='<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M6 5.5l5 2.5-5 2.5V5.5z" fill="currentColor" stroke="none"/></svg> Initialize Use Case';btn.classList.remove('running');btn.disabled=false;}
-  syncCCBtn();
+  ccTranscripts.forEach(el=>el.classList.add('tx-done')); ccTranscripts.clear(); ccDialerTxMap.clear();
+  const b=document.getElementById('cc-init-btn');
+  if (b){b.innerHTML='<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M6 5.5l5 2.5-5 2.5V5.5z" fill="currentColor" stroke="none"/></svg> Initialize Use Case';b.classList.remove('running');b.disabled=false;}
   document.getElementById('liveDialerCard').classList.remove('visible');
+  renderCCLoads(); syncCCBtn();
 }
 
 async function resetCCDemo() {
@@ -1406,7 +1447,7 @@ async function arStartCall() {
         try { const text=await reader.readAll(); arUpdateTranscript('chat-'+Date.now(),text,isAgent,true); } catch(e){}
       });
     }
-    await dispatchAgent(room,LK_WS_URL,LK_API_KEY,LK_API_SECRET,AGENT_NAME,'ar_collections');
+    await dispatchAgent(room,LK_WS_URL,LK_API_KEY,LK_API_SECRET,AGENT_NAME,{use_case:'ar_collections'});
     await arLkRoom.startAudio();
     await arLkRoom.localParticipant.setMicrophoneEnabled(true);
     arCallState='active'; syncARBtn();
