@@ -1210,13 +1210,20 @@ async function ccStartCallForCarrier(carrier) {
   if (initBtn){initBtn.innerHTML='<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 3h2v10H5zM9 3h2v10H9z"/></svg> End Sequence';initBtn.classList.add('running');}
   try {
     if (typeof LivekitClient==='undefined') throw new Error('LiveKit SDK not loaded.');
-    const room=newRoomName('cc');
-    const token=await makeParticipantToken(room,LK_API_KEY,LK_API_SECRET);
-    if (ccLkRoom) { await ccLkRoom.disconnect(); ccLkRoom=null; }
+    const roomName=newRoomName('cc');
+    const token=await makeParticipantToken(roomName,LK_API_KEY,LK_API_SECRET);
+    // Clean up any lingering previous room
+    if (ccLkRoom) { const old=ccLkRoom; ccLkRoom=null; await old.disconnect(); }
     ccTranscripts.forEach(el=>el.classList.add('tx-done')); ccTranscripts.clear();
     ccDialerTxMap.clear();
-    ccLkRoom=new LivekitClient.Room({adaptiveStream:true,dynacast:true});
-    ccLkRoom.on(LivekitClient.RoomEvent.Disconnected,()=>{
+
+    // Create new room — capture as local ref to guard the Disconnected handler
+    const thisRoom=new LivekitClient.Room({adaptiveStream:true,dynacast:true});
+    ccLkRoom=thisRoom;
+
+    thisRoom.on(LivekitClient.RoomEvent.Disconnected,()=>{
+      if (ccLkRoom!==thisRoom) return;  // Guard: already replaced by a newer call or stopCCSequence
+      ccLkRoom=null;
       ccCallState='idle'; clearInterval(ccDialerInt);
       document.querySelectorAll('audio[data-lk-participant^="cc-"]').forEach(el=>el.remove());
       if (ccAutoRunning&&ccDemoIdx<CC_DEMO_CARRIERS.length-1) {
@@ -1225,34 +1232,44 @@ async function ccStartCallForCarrier(carrier) {
         ccSequenceComplete();
       }
     });
-    ccLkRoom.on(LivekitClient.RoomEvent.TrackSubscribed,(track,_pub,p)=>{
+    thisRoom.on(LivekitClient.RoomEvent.TrackSubscribed,(track,_pub,p)=>{
       if (track.kind===LivekitClient.Track.Kind.Audio) {
         const el=track.attach(); el.dataset.lkParticipant='cc-'+p.sid; document.body.appendChild(el);
+        dbg('[CC] Audio attached — '+p.identity);
       }
     });
-    ccLkRoom.on(LivekitClient.RoomEvent.TrackUnsubscribed,track=>track.detach().forEach(el=>el.remove()));
-    ccLkRoom.on(LivekitClient.RoomEvent.ActiveSpeakersChanged,spk=>{
-      if (activeTab==='cc') updateAudioBars(spk.some(p=>p!==ccLkRoom.localParticipant));
+    thisRoom.on(LivekitClient.RoomEvent.TrackUnsubscribed,track=>track.detach().forEach(el=>el.remove()));
+    thisRoom.on(LivekitClient.RoomEvent.ActiveSpeakersChanged,spk=>{
+      if (activeTab==='cc') updateAudioBars(spk.some(p=>p!==thisRoom.localParticipant));
     });
-    await ccLkRoom.connect(LK_WS_URL,token); dbg('[CC] Connected · '+carrier.name);
-    if (typeof ccLkRoom.registerTextStreamHandler==='function') {
-      ccLkRoom.registerTextStreamHandler('lk.transcription',async(reader,pInfo)=>{
+
+    await thisRoom.connect(LK_WS_URL,token);
+    dbg('[CC] Connected · '+carrier.name);
+
+    // Unlock audio playback IMMEDIATELY after connect (must stay close to the user gesture)
+    await thisRoom.startAudio();
+    await thisRoom.localParticipant.setMicrophoneEnabled(true);
+    dbg('[CC] Audio unlocked, mic enabled');
+
+    if (typeof thisRoom.registerTextStreamHandler==='function') {
+      thisRoom.registerTextStreamHandler('lk.transcription',async(reader,pInfo)=>{
         const attrs=(reader.info&&reader.info.attributes)||{};
         const segId=attrs['lk.segment_id'], isFinal=attrs['lk.transcription_final']!=='false';
-        const isAgent=pInfo.identity!==ccLkRoom.localParticipant.identity;
+        const isAgent=pInfo.identity!==thisRoom.localParticipant.identity;
         if (!segId&&!isFinal) return;
         try { const text=await reader.readAll(); ccUpdateTranscript(segId||('cc-'+Date.now()),text,isAgent,isFinal); } catch(e){}
       });
-      ccLkRoom.registerTextStreamHandler('lk.chat',async(reader,pInfo)=>{
-        const isAgent=pInfo.identity!==ccLkRoom.localParticipant.identity;
+      thisRoom.registerTextStreamHandler('lk.chat',async(reader,pInfo)=>{
+        const isAgent=pInfo.identity!==thisRoom.localParticipant.identity;
         try { const text=await reader.readAll(); ccUpdateTranscript('chat-'+Date.now(),text,isAgent,true); } catch(e){}
       });
     }
+
+    // Dispatch agent AFTER audio is unlocked
     const meta={use_case:'carrier_check',driver_name:carrier.name,ref:carrier.load,route:carrier.route,
       gps_idle_mins:carrier.gpsIdleMins,alert_type:carrier.alertType};
-    await dispatchAgent(room,LK_WS_URL,LK_API_KEY,LK_API_SECRET,AGENT_NAME,meta);
-    await ccLkRoom.startAudio();
-    await ccLkRoom.localParticipant.setMicrophoneEnabled(true);
+    await dispatchAgent(roomName,LK_WS_URL,LK_API_KEY,LK_API_SECRET,AGENT_NAME,meta);
+
     ccCallState='active'; syncCCBtn();
     clearInterval(ccDialerInt); ccDialerSecs=0;
     ccDialerInt=setInterval(()=>{
@@ -1311,7 +1328,7 @@ function ccSequenceComplete() {
 function stopCCSequence() {
   clearInterval(ccDialerInt); clearInterval(ccCountdownInt); ccCountdownInt=null;
   ccDemoIdx=-1; ccDoneSet=new Set(); ccAutoRunning=false; ccCallState='idle';
-  if (ccLkRoom) { ccLkRoom.disconnect(); ccLkRoom=null; }
+  if (ccLkRoom) { const r=ccLkRoom; ccLkRoom=null; r.disconnect(); }
   document.querySelectorAll('audio[data-lk-participant^="cc-"]').forEach(el=>el.remove());
   ccTranscripts.forEach(el=>el.classList.add('tx-done')); ccTranscripts.clear(); ccDialerTxMap.clear();
   const b=document.getElementById('cc-init-btn');
