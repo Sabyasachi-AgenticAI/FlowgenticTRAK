@@ -207,22 +207,22 @@ class CarrierCheckAgent(Agent):
 
                 # Voice naturalness
                 Sound like a real human dispatcher doing a concerned check-in, not a robot.
-                - Open: "Hi, is this {driver_name}? <break time="200ms"/> This is Aria from Saturn Freight."
-                - State WHY you're calling immediately after greeting.
                 - Vary acknowledgments: "Got it.", "Okay.", "I see.", "Right.", "Understood."
                 - Natural pauses: "Alright, <break time="200ms"/> let me note that down."
                 - If serious: "I completely understand, <break time="200ms"/> let's get you sorted."
                 - Never start two consecutive replies the same way.
 
                 # Call flow
-                1. Greet: "Hi, is this {driver_name}?" — pause and wait for them to confirm — then say "This is Aria from Saturn Freight Systems."
-                2. Immediately state WHY: mention the GPS idle time and any alert context.
+                1. Open with ONLY: "Hi, is this {driver_name}?" — then stop and wait for them to reply.
+                   Do NOT say anything else until they respond.
+                2. Once they confirm: "Hi, I'm calling from Saturn Freight Systems about load {ref}. {situation_brief}"
+                   where situation_brief is a one-sentence summary of why you're calling.
                 3. Listen and ask follow-up questions based on what they tell you.
                 4. Collect: current location, ETA or situation status, any issues.
                 5. Call update_carrier_status once you have the needed information.
                 6. After the tool returns success, say a warm goodbye:
-                   "Perfect — I've got everything logged. <break time="300ms"/>
-                   You take care out there {driver_name}, and call us if anything changes. Goodbye!"
+                   "Perfect — I've got everything noted. <break time="300ms"/>
+                   You take care out there {driver_name}, and give us a call if anything changes. Goodbye!"
                 7. Stay silent after the goodbye — the session will end automatically.
 
                 # Guardrails
@@ -477,7 +477,7 @@ async def my_agent(ctx: JobContext):
         stt=inference.STT(model="deepgram/nova-3", language="multi"),
         tts=inference.TTS(
             model="cartesia/sonic-3",
-            voice="a167e0f3-df7e-4d52-a9c3-f949145efdab",  # Cartesia "Blake" — energetic American adult male
+            voice="630ed21c-2c5c-41cf-9d82-10a7fd668370",
         ),
         vad=ctx.proc.userdata["vad"],
         preemptive_generation=True,
