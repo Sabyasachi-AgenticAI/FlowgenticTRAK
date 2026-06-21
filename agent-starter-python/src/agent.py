@@ -215,8 +215,8 @@ class CarrierCheckAgent(Agent):
                 # Call flow
                 1. Open with ONLY: "Hi, is this {driver_name}?" — then stop and wait for them to reply.
                    Do NOT say anything else until they respond.
-                2. Once they confirm: "Hi, I'm calling from Saturn Freight Systems about load {ref}. {situation_brief}"
-                   where situation_brief is a one-sentence summary of why you're calling.
+                2. Once they confirm: say "Hi, I'm calling from Saturn Freight Systems about load {ref}."
+                   Then immediately state WHY you're calling in one sentence (use the situation above).
                 3. Listen and ask follow-up questions based on what they tell you.
                 4. Collect: current location, ETA or situation status, any issues.
                 5. Call update_carrier_status once you have the needed information.
