@@ -479,7 +479,6 @@ async def my_agent(ctx: JobContext):
             model="cartesia/sonic-3",
             voice="a167e0f3-df7e-4d52-a9c3-f949145efdab",  # Cartesia "Blake" — energetic American adult male
         ),
-        turn_detection=inference.TurnDetector(),  # audio-based EOT model (replaces deprecated MultilingualModel)
         vad=ctx.proc.userdata["vad"],
         preemptive_generation=True,
     )
