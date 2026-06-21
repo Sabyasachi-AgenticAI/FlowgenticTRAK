@@ -1,540 +1,642 @@
 'use client'
-
 import { useEffect } from 'react'
 import { createClient } from '@supabase/supabase-js'
 
-// ── TYPES ──────────────────────────────────────────────
-interface DriverRow {
-  name: string; initial: string; truck: string; load: string
-  route: string; location: string; eta: string; status: string; checkedAt: string
+// ── Config ────────────────────────────────────────────────────
+const SUPA_URL  = 'https://xfhegmlpfqqbipzngjcu.supabase.co'
+const SUPA_ANON = 'sb_publishable_I7CK8LBaIZpspmO2cX43PQ_fX9MzZVI'
+const LK_API_KEY    = 'APIDLrS54kQE5Xq'
+const LK_API_SECRET = '0IrflhGErY1tMakBOUC4HfzKSMnlvYy7fHHrtbJNglvA'
+const LK_WS_URL     = 'wss://flowgentic-trak-91ox6qih.livekit.cloud'
+const AGENT_NAME    = 'my-agent'
+
+function newRoomName(prefix: string) { return prefix+'-'+Math.random().toString(36).slice(2,9) }
+const db = createClient(SUPA_URL, SUPA_ANON)
+
+// ── LiveKit lazy loader ───────────────────────────────────────
+let _LK: typeof import('livekit-client') | null = null
+async function getLK() { if (!_LK) _LK = await import('livekit-client'); return _LK! }
+
+// ── JWT helpers (browser crypto) ──────────────────────────────
+function b64url(str: string) {
+  return btoa(unescape(encodeURIComponent(str))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'')
 }
-interface ScriptLine { speaker: string; text: string }
-interface FeedItem { name: string; body: string; chips?: [string, string][]; time: string }
-interface ARRow { debtor: string; invoice: string; balance: string; days: string; time: string; outcome: string }
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type LiveRow = any
+function b64urlBuf(buf: ArrayBuffer) {
+  const b=new Uint8Array(buf); let s=''
+  for (let i=0;i<b.length;i++) s+=String.fromCharCode(b[i])
+  return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'')
+}
+async function signJWT(payload: object, secret: string) {
+  const hdr=b64url(JSON.stringify({alg:'HS256',typ:'JWT'}))
+  const pay=b64url(JSON.stringify(payload))
+  const inp=`${hdr}.${pay}`
+  const enc=new TextEncoder()
+  const key=await crypto.subtle.importKey('raw',enc.encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign'])
+  const sig=await crypto.subtle.sign('HMAC',key,enc.encode(inp))
+  return `${inp}.${b64urlBuf(sig)}`
+}
+async function makeParticipantToken(room: string) {
+  const now=Math.floor(Date.now()/1000)
+  return signJWT({iss:LK_API_KEY,exp:now+3600,nbf:now,jti:`user-${Date.now()}`,
+    video:{room,roomJoin:true,canPublish:true,canSubscribe:true,canPublishData:true},
+    name:'CSA Demo Viewer',metadata:''},LK_API_SECRET)
+}
+async function makeAdminToken(room: string) {
+  const now=Math.floor(Date.now()/1000)
+  return signJWT({iss:LK_API_KEY,exp:now+300,nbf:now,video:{room,roomCreate:true,roomAdmin:true}},LK_API_SECRET)
+}
+async function dispatchAgent(room: string, metadata?: object) {
+  try {
+    const tok=await makeAdminToken(room)
+    const httpUrl=LK_WS_URL.replace('wss://','https://')
+    const body: Record<string,unknown>={room,agentName:AGENT_NAME}
+    if (metadata) body.metadata=JSON.stringify(metadata)
+    const res=await fetch(`${httpUrl}/twirp/livekit.AgentDispatchService/CreateDispatch`,
+      {method:'POST',headers:{'Authorization':'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify(body)})
+    if (!res.ok) dbg('Dispatch error '+res.status)
+    else dbg('Dispatch OK — '+AGENT_NAME+(metadata?' · '+(metadata as any).use_case:''))
+  } catch(e:any) { dbg('Dispatch failed: '+e.message) }
+}
 
-// ── SUPABASE CLIENT ────────────────────────────────────
-const _sb = createClient(
-  'https://xfhegmlpfqqbipzngjcu.supabase.co',
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhmaGVnbWxwZnFxYmlwem5namN1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAyMzYzMTAsImV4cCI6MjA5NTgxMjMxMH0.4HTDuQ_pB9A3XNQa4wsbubrBwfE0l24FznFnFzQ1rfE'
-)
+// ── Module-level state ────────────────────────────────────────
+let loads: any[]=[],hasNewLoad=false,lkRoom: any=null,callState='idle'
+const activeTranscripts=new Map<string,HTMLElement>()
+const modalTranscripts=new Map<string,HTMLElement>()
+let activeTab='cc'
+const feedCounts={lt:0,cc:0,ar:0}
+let callModalTimerInt: ReturnType<typeof setInterval>|null=null
 
-// ── SEED DATA ──────────────────────────────────────────
-const ltData = [
-  { shipper:'Apex Freight Co.',   loadId:'LT-8821', origin:'Chicago, IL',      dest:'Dallas, TX',       pickup:'Jun 19', rate:'$2,400', status:'confirmed' },
-  { shipper:'Midwest Cargo',      loadId:'LT-8822', origin:'St. Louis, MO',    dest:'Memphis, TN',      pickup:'Jun 19', rate:'$1,850', status:'pending'   },
-  { shipper:'Eagle Logistics',    loadId:'LT-8823', origin:'Atlanta, GA',       dest:'Miami, FL',        pickup:'Jun 20', rate:'$3,100', status:'confirmed' },
-  { shipper:'Titan Transport',    loadId:'LT-8824', origin:'Denver, CO',        dest:'Phoenix, AZ',      pickup:'Jun 20', rate:'$2,750', status:'callback'  },
-  { shipper:'Summit Shipping',    loadId:'LT-8825', origin:'Seattle, WA',       dest:'Portland, OR',     pickup:'Jun 21', rate:'$1,200', status:'confirmed' },
-  { shipper:'Pacific Haul',       loadId:'LT-8826', origin:'Los Angeles, CA',   dest:'Las Vegas, NV',    pickup:'Jun 21', rate:'$980',   status:'declined'  },
-  { shipper:'BlueLine Co.',       loadId:'LT-8827', origin:'Houston, TX',       dest:'New Orleans, LA',  pickup:'Jun 22', rate:'$1,600', status:'pending'   },
-  { shipper:'Keystone Trucking',  loadId:'LT-8828', origin:'Philadelphia, PA',  dest:'Boston, MA',       pickup:'Jun 22', rate:'$2,100', status:'confirmed' },
+// CC state
+let ccLoads: any[]=[],ccHasCallMade=false,ccLkRoom: any=null,ccCallState='idle'
+const ccTranscripts=new Map<string,HTMLElement>(),ccDialerTxMap=new Map<string,HTMLElement>()
+let ccAutoRunning=false,ccDialerInt: ReturnType<typeof setInterval>|null=null,ccDialerSecs=0
+let ccDoneSet=new Set<number>(),ccCountdownInt: ReturnType<typeof setInterval>|null=null,ccDemoIdx=-1
+const _ccFeedRefs=new Set<string>()
+
+// AR state
+let arAccounts: any[]=[],arHasCallMade=false,arLkRoom: any=null,arCallState='idle'
+const arTranscripts=new Map<string,HTMLElement>()
+
+const CC_DEMO_CARRIERS=[
+  {name:'Marcus Webb',initial:'M',load:'REF-29472',route:'MIA → LAX',pickup:'Jun 21, 07:00 CT',gpsIdleMins:97,alertType:'gps_idle'},
+  {name:'Sandra Patel',initial:'S',load:'REF-29471',route:'LAX → ORD',pickup:'Jun 21, 08:00 CT',gpsIdleMins:35,alertType:'gps_idle'},
+  {name:'James Carter',initial:'J',load:'CC-038',route:'ATL → CLT',pickup:'Jun 21, 07:00 CT',gpsIdleMins:120,alertType:'driver_initiated_vehicle_breakdown'},
 ]
 
-const driverData: DriverRow[] = [
-  { name:'Marcus Johnson', initial:'M', truck:'TRK-441', load:'LT-8821', route:'Chicago → Dallas',      location:'Joplin, MO',         eta:'4:30 PM',  status:'pending', checkedAt:'' },
-  { name:'Daria Reyes',    initial:'D', truck:'TRK-559', load:'LT-8823', route:'Atlanta → Miami',       location:'Gainesville, FL',    eta:'2:15 PM',  status:'pending', checkedAt:'' },
-  { name:'Tommy Briggs',   initial:'T', truck:'TRK-782', load:'LT-8825', route:'Seattle → Portland',    location:'Tacoma, WA',         eta:'11:45 AM', status:'pending', checkedAt:'' },
-  { name:'Sandeep Patel',  initial:'S', truck:'TRK-203', load:'LT-8828', route:'Philadelphia → Boston', location:'Hartford, CT',        eta:'3:00 PM',  status:'pending', checkedAt:'' },
-  { name:'Linda Wu',       initial:'L', truck:'TRK-671', load:'LT-8822', route:'St. Louis → Memphis',   location:'Cape Girardeau, MO', eta:'2:00 PM',  status:'pending', checkedAt:'' },
-  { name:'Carlos Mendez',  initial:'C', truck:'TRK-318', load:'LT-8827', route:'Houston → New Orleans', location:'Baton Rouge, LA',    eta:'12:45 PM', status:'pending', checkedAt:'' },
-]
-const driverOutcomes = ['acknowledged','acknowledged','no-answer','acknowledged','delayed','acknowledged']
-
-const ccLiveScripts: ScriptLine[][] = [
-  [
-    { speaker:'aria',  text:'Hi James, Aria from Saturn Freight. Quick check on REF-29468, DFW to Atlanta — can you confirm your location and ETA?' },
-    { speaker:'human', text:'Hey Aria, just past the Texas border. Should hit the Atlanta dock around 3:30 this afternoon.' },
-    { speaker:'aria',  text:'Logged — on track for Thu 15:30 Atlanta. Drive safe James!' },
-  ],
-  [
-    { speaker:'aria',  text:"Tony, Aria calling from Saturn Freight on REF-29465, ORD to JFK. Can you confirm you're en route?" },
-    { speaker:'human', text:'Yes, just rolled through Gary Indiana. On schedule for JFK 7:45 tomorrow morning.' },
-    { speaker:'aria',  text:'Confirmed — Gary IN, ETA Thu 07:45 JFK. All good. Thanks Tony!' },
-  ],
-  [
-    { speaker:'aria',  text:"Marcus, this is Aria from Saturn Freight. REF-29472, Miami to LAX — our GPS shows no movement in over 90 minutes. Is everything okay?" },
-    { speaker:'human', text:'' },
-    { speaker:'aria',  text:'No answer from Marcus Webb — REF-29472 GPS inactive 97 minutes. Flagging for immediate manual dispatcher follow-up.' },
-  ],
-  [
-    { speaker:'aria',  text:"Sandra, Aria here from Saturn Freight. REF-29471, LAX to Chicago — we're showing a temperature alert, 8.4 degrees versus a 5 degree threshold. Can you check the reefer?" },
-    { speaker:'human', text:'On it — looks like the compressor cycled off. Resetting it now.' },
-    { speaker:'aria',  text:'Temp breach logged on REF-29471. Sandra resetting reefer. Flagging for dispatcher review. ETA Chicago 14:00 unchanged.' },
-  ],
-]
-const ccLiveOutcomes = ['acknowledged','acknowledged','no-answer','delayed']
-
-const driverScripts: ScriptLine[][] = [
-  [{ speaker:'aria',text:'Hi Marcus, Aria from CSA dispatch. Quick check-in on LT-8821 to Dallas — can you confirm your location and ETA?' },{ speaker:'human',text:'Hey Aria, just passed Joplin MO. Should roll into Dallas around 4:30 PM.' },{ speaker:'aria',text:'Logged — Joplin MO, ETA 4:30 PM. You are on track. Drive safe Marcus!' }],
-  [{ speaker:'aria',text:'Hi Daria, Aria here from CSA. Checking in on LT-8823 to Miami. Where are you right now?' },{ speaker:'human',text:'Just past Gainesville Florida. Delivery around 2:15 this afternoon.' },{ speaker:'aria',text:'Got it — Gainesville FL, ETA 2:15 PM. All logged. Thanks Daria!' }],
-  [{ speaker:'aria',text:'Hi Tommy, Aria from CSA. Check-in on LT-8825 Portland delivery. What is your current position?' },{ speaker:'human',text:'' },{ speaker:'aria',text:'No answer from Tommy Briggs on TRK-782. Leaving voicemail — flagging LT-8825 for manual follow-up.' }],
-  [{ speaker:'aria',text:'Hi Sandeep, Aria calling from CSA about LT-8828 to Boston. Can you give me your location and ETA?' },{ speaker:'human',text:'I am in Hartford Connecticut. Estimating 3 PM arrival in Boston.' },{ speaker:'aria',text:'Logged — Hartford CT, ETA 3:00 PM. Right on schedule. Thanks Sandeep!' }],
-  [{ speaker:'aria',text:'Hi Linda, Aria here from CSA. Checking in on LT-8822 Memphis run. Where are you and what is your ETA?' },{ speaker:'human',text:'Near Cape Girardeau. Had a tire issue — might be 30 minutes late, closer to 2 PM.' },{ speaker:'aria',text:'Understood — Cape Girardeau MO, revised ETA 2:00 PM, minor delay flagged. Thanks Linda!' }],
-  [{ speaker:'aria',text:'Hi Carlos, Aria from CSA. Location check on LT-8827 New Orleans delivery.' },{ speaker:'human',text:'Hey, in Baton Rouge right now. Should be at the dock by 12:45.' },{ speaker:'aria',text:'Excellent — Baton Rouge LA, ETA 12:45 PM. All set. Talk soon Carlos!' }],
-]
-
-const arData: ARRow[] = [
-  { debtor:'Pinnacle Foods Corp.',   invoice:'INV-3341', balance:'$14,200', days:'47', time:'8:55 AM',  outcome:'promise'  },
-  { debtor:'Lakewood Distributors',  invoice:'INV-3298', balance:'$8,750',  days:'61', time:'9:10 AM',  outcome:'dispute'  },
-  { debtor:'Hartwell Industries',    invoice:'INV-3315', balance:'$22,500', days:'33', time:'9:28 AM',  outcome:'paid'     },
-  { debtor:'Greenfield Markets',     invoice:'INV-3307', balance:'$6,900',  days:'55', time:'9:45 AM',  outcome:'promise'  },
-  { debtor:'Coastal Fresh LLC',      invoice:'INV-3352', balance:'$11,400', days:'29', time:'10:05 AM', outcome:'voicemail'},
-]
-
-const transcripts: Record<string, ScriptLine[]> = {
-  lt: [
-    { speaker:'human', text:"Hi, I'm calling about booking a load — I saw the posting for Indianapolis to Nashville." },
-    { speaker:'aria',  text:"Hi! Thanks for calling CSA. I'm Aria, your booking assistant. That's load LT-8829, picking up June 20th, dry van, $2,200 all-in. Ready to confirm?" },
-    { speaker:'human', text:'Yes, MC number is 443201, we have a 53-foot dry van available.' },
-    { speaker:'aria',  text:"Perfect — MC-443201 verified. Booking confirmed for June 20th pickup in Indianapolis. I'll send the rate confirmation to your email now. Anything else?" },
-    { speaker:'human', text:"No that's all, thank you." },
-    { speaker:'aria',  text:"Great — you're all set! Safe travels." },
-  ],
-  cc: [
-    { speaker:'aria',  text:"Hi, this is Aria from CSA dispatch. I'm looking for available dry van capacity on the Chicago to Dallas lane for June 19th." },
-    { speaker:'human', text:"We might have something. What's the weight?" },
-    { speaker:'aria',  text:"It's 42,000 lbs, full truckload. Rate is $2,400 all-in." },
-    { speaker:'human', text:'Let me check with our driver. Can I call you back in 20 minutes?' },
-    { speaker:'aria',  text:"Absolutely. I'll log you as pending. We'll await your callback. Thank you!" },
-  ],
-  ar: [
-    { speaker:'aria',  text:"Good morning, this is Aria calling from CSA regarding invoice INV-3360 for $9,800 which is 38 days past due." },
-    { speaker:'human', text:"I'm aware of that invoice." },
-    { speaker:'aria',  text:"Wonderful. Could you arrange payment this week to avoid a late fee? We accept ACH, check, or credit card." },
-    { speaker:'human', text:'We can do ACH by Friday.' },
-    { speaker:'aria',  text:"Friday ACH noted. I'll update our records and send you a payment link. Thank you!" },
-  ],
-}
-
-// ── MODULE STATE ───────────────────────────────────────
-let ccLiveData: LiveRow[] = []
-let activeTab = 'lt'
-let callActive = false
-let callSeconds = 0
-let callTimerInterval: ReturnType<typeof setInterval> | null = null
-let transcriptLines: ScriptLine[] = []
-let feedItems: FeedItem[] = []
-let arRows: ARRow[] = []
-let ccAutoRunning = false
-let ccDriverIdx = 0
-let ccDialerInt: ReturnType<typeof setInterval> | null = null
-let ccDialerSecs = 0
-let ccTransLines: ScriptLine[] = []
-
-// ── HELPERS ────────────────────────────────────────────
-function chip(label: string, cls: string) {
-  return `<span class="chip ${cls}"><span class="chip-dot"></span>${label}</span>`
-}
-function statusChip(s: string) {
-  const map: Record<string, string> = {
-    confirmed:  chip('Confirmed', 'chip-success'),
-    pending:    chip('Pending',   'chip-warning'),
-    callback:   chip('Callback',  'chip-info'),
-    declined:   chip('Declined',  'chip-danger'),
-    'no-answer':chip('No Answer', 'chip-neutral'),
-    promise:    chip('Promise',   'chip-success'),
-    dispute:    chip('Dispute',   'chip-danger'),
-    paid:       chip('Paid',      'chip-success'),
-    voicemail:  chip('Voicemail', 'chip-neutral'),
+// ── DOM helpers ───────────────────────────────────────────────
+function el(id: string) { return document.getElementById(id) }
+function chip(label: string,cls: string){return`<span class="chip ${cls}"><span class="chip-dot"></span>${label}</span>`}
+function statusChip(st: string){
+  const m: Record<string,string>={
+    new:chip('New','chip-success'),act:chip('Active','chip-info'),delivered:chip('Delivered','chip-neutral'),
+    confirmed:chip('Confirmed','chip-success'),pending_check:chip('Pending','chip-warning'),
+    issue_raised:chip('Issue Raised','chip-warning'),rescheduled:chip('Rescheduled','chip-info'),
+    in_progress:chip('In Progress','chip-info'),completed:chip('Completed','chip-neutral'),
+    paid:chip('Collected','chip-success'),payment_promised:chip('Promised','chip-info'),
+    escalated:chip('Escalated','chip-warning'),
   }
-  return map[s] || chip(s, 'chip-neutral')
+  return m[st]||chip(st,'chip-neutral')
 }
-function nowTime() {
-  const d = new Date()
-  return d.getHours() + ':' + String(d.getMinutes()).padStart(2,'0') + ':' + String(d.getSeconds()).padStart(2,'0')
+function callStatusChip(st: string){
+  if(st==='in_progress')return chip('In Progress','chip-warning')
+  if(st==='completed')return chip('Completed','chip-neutral')
+  return chip('Not Called','chip-neutral')
 }
-function el(id: string) { return document.getElementById(id)! }
-
-// ── ALERT HELPERS ─────────────────────────────────────
-function computeAlerts(row: LiveRow) {
-  const alerts: { type: string; mins?: number; temp?: number; thr?: number }[] = []
-  if (row.gps_last_moved_at) {
-    const mins = (Date.now() - new Date(row.gps_last_moved_at).getTime()) / 60000
-    if (mins >= 90) alerts.push({ type:'gps', mins: Math.round(mins) })
-  }
-  if (row.temp_c != null && row.temp_threshold_c != null &&
-      parseFloat(row.temp_c) > parseFloat(row.temp_threshold_c)) {
-    alerts.push({ type:'temp', temp: row.temp_c, thr: row.temp_threshold_c })
-  }
-  return alerts
-}
-
-// ── SUPABASE ───────────────────────────────────────────
-async function loadCCLive() {
-  const { data } = await _sb.from('carrier_check_loads').select('*').order('id', { ascending:true })
-  if (data && data.length) {
-    ccLiveData = data
-    renderDriverTable()
-    updateCCMetrics()
+function incFeed(tab: string){
+  feedCounts[tab as keyof typeof feedCounts]++
+  if(activeTab===tab){
+    const fc=el('feedCount');const n=feedCounts[tab as keyof typeof feedCounts]
+    if(fc)fc.textContent=n+' event'+(n!==1?'s':'')
   }
 }
-function updateCCMetrics() {
-  const called    = ccLiveData.filter(r => r.call_status === 'completed').length
-  const confirmed = ccLiveData.filter(r => r.call_status === 'completed' && (r.status === 'confirmed' || r.status === 'delayed')).length
-  const noAns     = ccLiveData.filter(r => r.status === 'rescheduled').length
-  el('cc-calls').textContent     = String(called)
-  el('cc-confirmed').textContent = String(confirmed)
-  el('cc-pending').textContent   = String(noAns)
-  el('cc-count').textContent     = confirmed + ' of ' + ccLiveData.length + ' drivers'
-}
-
-// ── RENDER FUNCTIONS ───────────────────────────────────
-function renderLT() {
-  el('lt-table-body').innerHTML = ltData.map(r => `
-    <div class="table-row">
-      <div><div class="cell-primary">${r.shipper}</div><div class="cell-mono">${r.loadId}</div></div>
-      <div class="cell-muted" style="font-size:var(--text-xs)">${r.origin} → ${r.dest}</div>
-      <div class="cell-muted">${r.pickup}</div>
-      <div style="font-family:var(--font-mono);font-size:var(--text-sm);color:var(--text-secondary);font-weight:600">${r.rate}</div>
-      <div>${statusChip(r.status)}</div>
-    </div>`).join('')
-  el('lt-count').textContent = ltData.length + ' loads'
-}
-
-function renderDriverTable() {
-  const body = document.getElementById('cc-table-body')
-  if (!body) return
-  if (!ccLiveData.length) {
-    body.innerHTML = '<div class="feed-empty">Connecting to live data… <span class="live-dot"></span></div>'
-    return
+function dbg(msg: string){
+  console.log('[LK]',msg)
+  let p=document.getElementById('dbg-panel')
+  if(!p){
+    p=document.createElement('div');p.id='dbg-panel'
+    p.style.cssText='position:fixed;bottom:16px;right:16px;width:360px;background:var(--slate-900);border:1px solid var(--slate-700);border-radius:var(--radius-md);padding:10px 12px;font-family:var(--font-mono);font-size:10px;color:var(--slate-400);z-index:9999;max-height:200px;overflow-y:auto'
+    p.innerHTML='<div style="color:var(--slate-500);font-size:9px;letter-spacing:1px;margin-bottom:6px">CALL DEBUG</div>'
+    document.body.appendChild(p)
   }
-  const simMap: Record<string, string> = {}
-  if (ccAutoRunning) driverData.forEach((d, i) => { if (ccLiveData[i]) simMap[ccLiveData[i].ref] = d.status })
+  const row=document.createElement('div')
+  row.style.cssText='padding:2px 0;border-top:1px solid var(--slate-800)'
+  row.textContent=msg
+  if(msg.includes('OK')||msg.includes('live'))row.style.color='var(--success-fg)'
+  if(msg.includes('ERROR')||msg.includes('error'))row.style.color='var(--danger-fg)'
+  p.appendChild(row);p.scrollTop=p.scrollHeight
+}
+function showError(msg: string){
+  let e=document.getElementById('call-error')
+  if(!e){e=document.createElement('div');e.id='call-error';e.style.cssText='position:fixed;bottom:16px;right:16px;background:var(--danger-bg);color:var(--danger-fg);border:1px solid var(--red-100);border-radius:var(--radius-md);padding:10px 14px;font-size:var(--text-sm);max-width:320px;z-index:999;display:none';document.body.appendChild(e)}
+  if(msg){e.textContent='⚠ '+msg;e.style.display='block'}else{e.style.display='none'}
+}
+function updateAudioBars(active: boolean){
+  document.querySelectorAll('.audio-bar').forEach(b=>b.classList.toggle('active',active))
+}
 
-  const stLabel: Record<string,string> = {
-    confirmed:'Confirmed',completed:'Confirmed',pending_check:'Pending',not_called:'Queued',
-    rescheduled:'Rescheduled',issue_raised:'Issue Raised',acknowledged:'Checked In',
-    delayed:'Delay Noted','no-answer':'No Answer',pending:'Queued',calling:'Calling…',
+// ── Topbar call state ─────────────────────────────────────────
+const TAB_BTN_LABEL={lt:'Call Aria · Load Tender',cc:'Initialize Use Case',ar:'Call Aria · AR Collections'}
+function setTopbarCallState(state: string,label?: string){
+  const btn=el('call-btn'),lbl=el('call-label'),pill=el('statusPill'),txt=el('statusText'),rst=el('reset-btn')
+  if(!btn||!lbl)return
+  btn.className='btn-call'+(state==='active'?' call-active':state==='connecting'?' call-connecting':'')
+  ;(btn as HTMLButtonElement).disabled=state==='connecting'
+  lbl.textContent=label||(state==='active'?'End Call':state==='connecting'?'Connecting…':TAB_BTN_LABEL.lt)
+  if(state==='active'&&pill&&txt){pill.className='status-pill live';txt.textContent='Live'}
+  else if(state==='idle'){
+    const anyActive=hasNewLoad||ccHasCallMade||arHasCallMade
+    if(rst)rst.style.display=anyActive?'flex':'none'
+    setTimeout(()=>{if(pill&&txt){pill.className='status-pill connecting';txt.textContent='Ready'}},800)
   }
-  const stCls: Record<string,string> = {
-    confirmed:'chip-success',completed:'chip-success',pending_check:'chip-warning',not_called:'chip-neutral',
-    rescheduled:'chip-info',issue_raised:'chip-danger',acknowledged:'chip-success',
-    delayed:'chip-warning','no-answer':'chip-neutral',pending:'chip-neutral',
+  updateAudioBars(false)
+}
+
+// ── Feed card ─────────────────────────────────────────────────
+function renderFeedCard(row: any,feedId: string,prepend: boolean){
+  const feedEl=el(feedId);if(!feedEl)return
+  const who=row.who==='aria'?'Aria AI · Saturn Freight':row.who==='cal'?'Caller · Saturn Freight':row.who==='carrier'?'Carrier · Inbound':row.who==='customer'?'Customer · Inbound':'System · Saturn Freight'
+  const isLive=row.who==='aria'
+  const badgeCls=row.badge_type==='auto'?'badge-auto':row.badge_type==='esc'?'badge-esc':'badge-live'
+  const badgeLabel=row.badge_type==='auto'?'Automated':row.badge_type==='esc'?'Escalated':'Live'
+  const d=document.createElement('div');d.className='feed-item'+(isLive?' live-item':'')
+  const q=(row.quote||'').substring(0,90)+(row.quote||'').length>90?'…':''
+  d.innerHTML=`<div class="feed-item-top"><span class="feed-item-name">${row.title}</span><span class="feed-item-time">${row.time_str}</span></div><div class="feed-item-who">${who}</div><div class="feed-item-quote">"${q}"</div><div class="feed-item-foot">${row.tool?`<span class="feed-tool">${row.tool}</span>`:'<span></span>'}<span class="feed-badge ${badgeCls}">${badgeLabel}</span></div>`
+  const empty=feedEl.querySelector('.feed-empty');if(empty)empty.remove()
+  if(prepend)feedEl.insertBefore(d,feedEl.firstChild);else feedEl.appendChild(d)
+}
+
+// ── Transcript helpers ────────────────────────────────────────
+function updateTranscriptEl(segId: string,text: string,isAgent: boolean,isFinal: boolean,feedId: string){
+  if(!text||!text.trim())return
+  const cls=isAgent?'tx-aria':'tx-user',label=isAgent?'⚡ ARIA':'👤 YOU'
+  let e=activeTranscripts.get(segId)
+  if(!e){
+    e=document.createElement('div');e.className=`tx-bubble ${cls}`
+    e.innerHTML=`<div class="tx-who">${label}</div><span class="tx-text"></span><span class="tx-cursor"></span>`
+    const feed=el(feedId);if(feed)feed.insertBefore(e,feed.firstChild)
+    activeTranscripts.set(segId,e)
   }
-
-  body.innerHTML = ccLiveData.map((row: LiveRow) => {
-    const alerts  = computeAlerts(row)
-    const hasGPS  = alerts.some(a => a.type === 'gps')
-    const hasTemp = alerts.some(a => a.type === 'temp')
-    const simSt   = simMap[row.ref]
-    const idle    = !ccAutoRunning && !hasGPS && !hasTemp && (row.call_status === 'not_called' || row.call_status === 'pending_check')
-    let rowCls    = 'table-row'
-    if (hasGPS) rowCls += ' row-alert-gps'
-    else if (hasTemp) rowCls += ' row-alert-temp'
-    const rowStyle = simSt === 'calling' ? 'background:rgba(245,158,11,0.09);' : idle ? 'opacity:.6;' : ''
-    const alertHtml = alerts.length
-      ? alerts.map(a => a.type==='gps'
-          ? `<span class="chip chip-danger"><span class="chip-dot"></span>GPS&nbsp;${a.mins}m&nbsp;idle</span>`
-          : `<span class="chip chip-warning"><span class="chip-dot"></span>${a.temp}°C&nbsp;&gt;&nbsp;${a.thr}°C</span>`
-        ).join('<br style="margin:2px 0">')
-      : `<span style="color:var(--text-muted);font-size:11px">—</span>`
-    const effSt = simSt || row.call_status || row.status || 'not_called'
-    const statusHtml = effSt === 'calling'
-      ? `<span class="chip chip-warning"><span class="chip-dot" style="animation:pulseDot 1s infinite"></span>Calling…</span>`
-      : `<span class="chip ${stCls[effSt]||'chip-neutral'}"><span class="chip-dot"></span>${stLabel[effSt]||effSt}</span>`
-    const name    = row.driver_name || row.carrier
-    const phone   = row.driver_phone || row.carrier_phone || '—'
-    const loc     = row.last_location || '—'
-    const eta     = row.last_eta || row.eta_confirmed || '—'
-    const summary = row.call_summary || `<span style="color:var(--text-muted);font-style:italic">Awaiting call…</span>`
-    const route   = row.route || (row.origin + ' → ' + row.destination)
-    return `<div class="${rowCls}" style="${rowStyle}">
-      <div class="cell-primary">${name}</div>
-      <div class="cell-mono" style="color:var(--amber-500);font-size:11px;word-break:break-all">${phone}</div>
-      <div><div class="cell-primary" style="font-size:var(--text-xs)">${route}</div><div class="cell-mono">${row.ref}</div></div>
-      <div><div class="cell-muted" style="font-size:var(--text-xs)">${loc}</div><div class="cell-mono" style="font-size:11px">${eta}</div></div>
-      <div style="font-size:var(--text-xs);line-height:1.45;color:var(--text-secondary)">${summary}</div>
-      <div>${alertHtml}</div>
-      <div>${statusHtml}</div>
-    </div>`
-  }).join('')
+  const t=e.querySelector('.tx-text');if(t)t.textContent=text
+  if(isFinal){e.classList.add('tx-done');activeTranscripts.delete(segId)}
+  updateModalTranscript(segId,text,isAgent,isFinal)
 }
-
-function renderAR() {
-  if (!arRows.length) {
-    el('ar-table-body').innerHTML = '<div class="feed-empty">No collection calls yet. Click <strong>Call Aria</strong> to begin.</div>'
-    return
+function updateModalTranscript(segId: string,text: string,isAgent: boolean,isFinal: boolean){
+  const wrap=el('callTranscript');if(!wrap)return
+  const cls=isAgent?'modal-tx-aria':'modal-tx-human',label=isAgent?'⚡ Aria':'👤 You'
+  let e=modalTranscripts.get(segId)
+  if(!e){
+    e=document.createElement('div');e.className=`modal-tx-line ${cls}`
+    e.innerHTML=`<span class="modal-tx-label">${label}:</span><span class="modal-tx-text"></span><span class="modal-tx-cursor"></span>`
+    wrap.insertBefore(e,wrap.firstChild);modalTranscripts.set(segId,e)
   }
-  el('ar-table-body').innerHTML = arRows.map(r => `
-    <div class="table-row">
-      <div><div class="cell-primary">${r.debtor}</div><div class="cell-mono">${r.invoice}</div></div>
-      <div style="font-family:var(--font-mono);font-size:var(--text-sm);color:var(--text-secondary);font-weight:600">${r.balance}</div>
-      <div class="cell-muted">${r.days}d</div>
-      <div class="cell-mono">${r.time}</div>
-      <div>${statusChip(r.outcome)}</div>
-    </div>`).join('')
-  el('ar-count').textContent = arRows.length + ' accounts'
+  const t=e.querySelector('.modal-tx-text');if(t)t.textContent=text
+  if(isFinal){e.classList.add('modal-tx-done');modalTranscripts.delete(segId);wrap.scrollTop=0}
 }
-
-function addFeedItem(name: string, body: string, chips?: [string, string][]) {
-  feedItems.unshift({ name, body, chips, time: nowTime() })
-  renderFeed()
-}
-function renderFeed() {
-  const feedEl = el('feedBody')
-  if (!feedItems.length) {
-    feedEl.innerHTML = '<div class="feed-empty">No activity yet.</div>'
-    el('feedCount').textContent = '0 events'
-    return
+function ccUpdateTranscript(segId: string,text: string,isAgent: boolean,isFinal: boolean){
+  if(!text||!text.trim())return
+  const cls=isAgent?'tx-aria':'tx-user',label=isAgent?'⚡ ARIA':'👤 YOU'
+  let e=ccTranscripts.get(segId)
+  if(!e){
+    e=document.createElement('div');e.className=`tx-bubble ${cls}`
+    e.innerHTML=`<div class="tx-who">${label}</div><span class="tx-text"></span><span class="tx-cursor"></span>`
+    const feed=el('feed-cc');if(feed)feed.insertBefore(e,feed.firstChild);ccTranscripts.set(segId,e)
   }
-  feedEl.innerHTML = feedItems.map(f => `
-    <div class="feed-item">
-      <div class="feed-item-top">
-        <span class="feed-item-name">${f.name}</span>
-        <span class="feed-item-time">${f.time}</span>
-      </div>
-      <div class="feed-item-body">${f.body}</div>
-      ${f.chips ? `<div class="feed-item-chips">${f.chips.map(c => chip(c[0], c[1])).join('')}</div>` : ''}
-    </div>`).join('')
-  el('feedCount').textContent = feedItems.length + ' event' + (feedItems.length !== 1 ? 's' : '')
-}
-
-// ── TAB SWITCH ────────────────────────────────────────
-function switchTab(tab: string, btn: HTMLElement) {
-  activeTab = tab
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'))
-  btn.classList.add('active')
-  ;(['lt','cc','ar'] as const).forEach(t => {
-    const p = document.getElementById('panel-' + t)
-    if (p) p.style.display = t === tab ? 'flex' : 'none'
-  })
-  const titles: Record<string,string> = { lt:'Load Tender Feed', cc:'Carrier Check Feed', ar:'AR Collections Feed' }
-  el('feedTitle').textContent = titles[tab]
-}
-
-// ── CALL MODAL ────────────────────────────────────────
-const callSubtitles: Record<string,string> = { lt:'Inbound · Carrier Booking', ar:'Outbound · AR Collections' }
-const callNames: Record<string,string>     = { lt:'Incoming — Carrier on the line', ar:'INV-3360 · $9,800 Due' }
-
-function startCall() {
-  callActive = true; callSeconds = 0; transcriptLines = []
-  el('callOverlay').classList.add('visible')
-  el('callName').textContent  = callNames[activeTab] || 'Aria'
-  el('callSub').textContent   = callSubtitles[activeTab]
-  el('callTranscript').innerHTML = ''
-  el('callTimer').textContent = '0:00'
-  el('statusPill').className  = 'status-pill live'
-  el('statusText').textContent = 'Live'
-  el('callBtnText').textContent = 'End Call'
-  el('callBtn').classList.add('active')
-  if (callTimerInterval) clearInterval(callTimerInterval)
-  callTimerInterval = setInterval(() => {
-    callSeconds++
-    el('callTimer').textContent = Math.floor(callSeconds/60) + ':' + String(callSeconds%60).padStart(2,'0')
-  }, 1000)
-  ;(transcripts[activeTab] || transcripts.lt).forEach((line, i) => {
-    setTimeout(() => {
-      transcriptLines.push(line)
-      const t = el('callTranscript')
-      t.innerHTML = transcriptLines.map(l => `
-        <div class="transcript-line ${l.speaker==='aria'?'transcript-aria':'transcript-human'}">
-          <span class="transcript-label">${l.speaker==='aria'?'⚡ Aria':'👤 Contact'}:</span>${l.text}
-        </div>`).join('')
-      t.scrollTop = t.scrollHeight
-    }, (i+1)*2800)
-  })
-}
-
-function endCall() {
-  if (!callActive) return
-  callActive = false
-  if (callTimerInterval) clearInterval(callTimerInterval)
-  el('callOverlay').classList.remove('visible')
-  el('statusPill').className   = 'status-pill idle'
-  el('statusText').textContent = 'Idle'
-  el('callBtnText').textContent = 'Call Aria'
-  el('callBtn').classList.remove('active')
-  const durStr = Math.floor(callSeconds/60) + ':' + String(callSeconds%60).padStart(2,'0')
-  if (activeTab === 'lt') {
-    el('lt-calls').textContent   = String(parseInt(el('lt-calls').textContent!) + 1)
-    el('lt-actions').textContent = String(parseInt(el('lt-actions').textContent!) + 1)
-    addFeedItem('Load Tender · LT-8829', 'Aria tendered Indy → Nashville, $2,200 dry van. Contact confirmed.', [['Confirmed','chip-success'],['$2,200','chip-info']])
-  } else if (activeTab === 'ar') {
-    const idx = arRows.length
-    if (idx < arData.length) arRows.push(arData[idx])
-    else {
-      const amt = (Math.floor(Math.random()*20)+5)*1000
-      arRows.push({ debtor:'Debtor Corp '+(idx+1), invoice:'INV-'+(3360+idx), balance:'$'+amt.toLocaleString(), days:String(Math.floor(Math.random()*60)+20), time:nowTime(), outcome:['promise','voicemail','paid'][Math.floor(Math.random()*3)] })
+  const t=e.querySelector('.tx-text');if(t)t.textContent=text
+  if(isFinal){e.classList.add('tx-done');ccTranscripts.delete(segId)}
+  const dw=el('dialerTranscript')
+  if(dw){
+    let dlEl=ccDialerTxMap.get(segId)
+    if(!dlEl){
+      dlEl=document.createElement('div');dlEl.className='dialer-t-line '+(isAgent?'dialer-t-aria':'dialer-t-human')
+      dlEl.innerHTML=`<span class="dialer-t-label">${isAgent?'Aria':'Driver'}:</span><span class="dialer-t-text"></span>`
+      dw.appendChild(dlEl);ccDialerTxMap.set(segId,dlEl)
     }
-    const row = arRows[arRows.length-1]
-    el('ar-calls').textContent = String(arRows.length)
-    const promised  = arRows.filter(r=>r.outcome==='promise').reduce((s,r)=>s+parseInt(r.balance.replace(/[^0-9]/g,'')),0)
-    const collected = arRows.filter(r=>r.outcome==='paid').reduce((s,r)=>s+parseInt(r.balance.replace(/[^0-9]/g,'')),0)
-    el('ar-promised').textContent  = promised.toLocaleString()
-    el('ar-collected').textContent = collected.toLocaleString()
-    renderAR()
-    addFeedItem('AR Collections · '+row.debtor, `Collection attempt on ${row.invoice} (${row.balance}, ${row.days}d overdue). Duration: ${durStr}.`, [[row.outcome==='promise'?'Promise to Pay':row.outcome==='paid'?'Paid':'Voicemail',row.outcome==='paid'?'chip-success':row.outcome==='promise'?'chip-info':'chip-neutral']])
+    const dt=dlEl.querySelector('.dialer-t-text');if(dt)dt.textContent=text
+    dw.scrollTop=dw.scrollHeight;if(isFinal)ccDialerTxMap.delete(segId)
   }
-  setTimeout(() => {
-    el('statusPill').className   = 'status-pill connecting'
-    el('statusText').textContent = 'Ready'
-  }, 1500)
 }
-
-// ── CC AUTO-DIALER ────────────────────────────────────
-function startCCSequence() {
-  ccAutoRunning = true; ccDriverIdx = 0
-  if (ccLiveData.length) {
-    driverData.length = 0
-    ccLiveData.forEach((row: LiveRow) => driverData.push({
-      name: row.driver_name || row.carrier,
-      initial: (row.driver_name || row.carrier || 'X')[0].toUpperCase(),
-      truck: row.ref, load: row.ref,
-      route: row.route || (row.origin+' → '+row.destination),
-      location: row.last_location || '—', eta: row.last_eta || row.eta_confirmed || '—',
-      status:'pending', checkedAt:'',
-    }))
-  } else { driverData.forEach(d => { d.status='pending'; d.checkedAt='' }) }
-  ;(['cc-calls','cc-confirmed','cc-pending'] as const).forEach(id => { el(id).textContent='0' })
-  el('cc-count').textContent = '0 of '+driverData.length+' drivers'
-  renderDriverTable()
-  el('callBtnText').textContent = 'Stop Sequence'
-  el('callBtn').classList.add('active')
-  el('statusPill').className   = 'status-pill live'
-  el('statusText').textContent = 'Live'
-  dialNextDriver()
-}
-
-function dialNextDriver() {
-  if (!ccAutoRunning) return
-  if (ccDriverIdx >= driverData.length) { stopCCSequence(); return }
-  const driver = driverData[ccDriverIdx], next = driverData[ccDriverIdx+1]
-  driver.status='calling'; ccDialerSecs=0; ccTransLines=[]
-  renderDriverTable()
-  el('liveDialerCard').classList.add('visible')
-  el('dialerInitial').textContent = driver.initial
-  el('dialerName').textContent    = driver.name
-  el('dialerMeta').textContent    = driver.truck+' · '+driver.load+' · '+driver.route
-  el('dialerCurrent').textContent = String(ccDriverIdx+1)
-  el('dialerTotal').textContent   = String(driverData.length)
-  el('dialerNext').textContent    = next ? next.name : 'Last driver'
-  el('dialerTimer').textContent   = '0:00'
-  el('dialerTranscript').innerHTML= ''
-  if (ccDialerInt) clearInterval(ccDialerInt)
-  ccDialerInt = setInterval(() => {
-    ccDialerSecs++
-    el('dialerTimer').textContent = Math.floor(ccDialerSecs/60)+':'+String(ccDialerSecs%60).padStart(2,'0')
-  }, 1000)
-  const scripts = ccLiveData.length ? ccLiveScripts : driverScripts
-  ;(scripts[ccDriverIdx]||[]).forEach((line,i) => setTimeout(() => {
-    if (!ccAutoRunning) return
-    ccTransLines.push(line)
-    const t = el('dialerTranscript')
-    t.innerHTML = ccTransLines.map(l =>
-      `<div class="dialer-transcript-line ${l.speaker==='aria'?'dialer-t-aria':'dialer-t-human'}"><span class="dialer-t-label">${l.speaker==='aria'?'⚡ Aria':'👤 Driver'}:</span>${l.text}</div>`
-    ).join('')
-    t.scrollTop = t.scrollHeight
-  }, (i+1)*2800))
-  setTimeout(() => completeDriverCall(driver), 10000)
-}
-
-function completeDriverCall(driver: DriverRow) {
-  if (ccDialerInt) clearInterval(ccDialerInt)
-  if (!ccAutoRunning) return
-  const outcomes = ccLiveData.length ? ccLiveOutcomes : driverOutcomes
-  const outcome  = outcomes[ccDriverIdx] || 'acknowledged'
-  driver.status  = outcome; driver.checkedAt = nowTime()
-  if (ccLiveData[ccDriverIdx]) {
-    const row       = ccLiveData[ccDriverIdx]
-    const newStatus = outcome==='acknowledged'||outcome==='delayed' ? 'confirmed' : 'rescheduled'
-    const sc        = (ccLiveData.length ? ccLiveScripts : driverScripts)[ccDriverIdx] || []
-    _sb.from('carrier_check_loads').update({
-      call_status:'completed', status:newStatus, call_summary: sc.length ? sc[sc.length-1].text : '',
-    }).eq('ref', row.ref).then(() => loadCCLive())
+function arUpdateTranscript(segId: string,text: string,isAgent: boolean,isFinal: boolean){
+  if(!text||!text.trim())return
+  const cls=isAgent?'tx-aria':'tx-user',label=isAgent?'⚡ ARIA':'👤 YOU'
+  let e=arTranscripts.get(segId)
+  if(!e){
+    e=document.createElement('div');e.className=`tx-bubble ${cls}`
+    e.innerHTML=`<div class="tx-who">${label}</div><span class="tx-text"></span><span class="tx-cursor"></span>`
+    const feed=el('feed-ar');if(feed)feed.insertBefore(e,feed.firstChild);arTranscripts.set(segId,e)
   }
-  el('cc-calls').textContent     = String(ccDriverIdx+1)
-  el('cc-confirmed').textContent = String(driverData.filter(d=>d.status==='acknowledged'||d.status==='delayed').length)
-  el('cc-pending').textContent   = String(driverData.filter(d=>d.status==='no-answer').length)
-  el('cc-count').textContent     = (ccDriverIdx+1)+' of '+driverData.length+' drivers'
-  renderDriverTable()
-  const label = outcome==='acknowledged'?'On Track':outcome==='delayed'?'Minor Delay':'No Answer'
-  const cls   = outcome==='acknowledged'?'chip-success':outcome==='delayed'?'chip-warning':'chip-neutral'
-  addFeedItem('Check-in · '+driver.name, driver.truck+' on '+driver.load+'. Location: '+driver.location+'. ETA: '+driver.eta+'.', [[label,cls]])
-  ccDriverIdx++
-  if (ccDriverIdx < driverData.length) setTimeout(()=>dialNextDriver(),1800)
-  else setTimeout(()=>stopCCSequence(),1200)
+  const t=e.querySelector('.tx-text');if(t)t.textContent=text
+  if(isFinal){e.classList.add('tx-done');arTranscripts.delete(segId)}
+  updateModalTranscript(segId,text,isAgent,isFinal)
 }
 
-function stopCCSequence() {
+// ── Load Tender data ──────────────────────────────────────────
+function renderLoads(){
+  const nc=loads.filter(l=>l.status==='new').length
+  const lc=el('lt-count');if(lc)lc.textContent=loads.length+' loads'+(nc?` · ${nc} new`:'')
+  const body=el('lt-table-body');if(!body)return
+  if(!loads.length){body.innerHTML='<div class="feed-empty">No loads found.</div>';return}
+  body.innerHTML=loads.map(l=>`<div class="table-row lt-cols${l.status==='new'?' row-highlight':''}"><div><div class="cell-primary">${l.shipper}</div><div class="cell-ref">${l.ref}</div></div><div class="cell-muted" style="font-size:var(--text-xs)">${l.route}</div><div class="cell-muted">${l.service}</div><div>${statusChip(l.status)}</div><div>${l.created_by==='aria'?'<span style="font-size:var(--text-xs);font-weight:var(--weight-semibold);color:var(--amber-700)">⚡ Aria AI</span>':`<span class="cell-muted">${l.created_by}</span>`}</div></div>`).join('')
+}
+async function loadData(){
+  const [lr,fr]=await Promise.all([
+    db.from('demo_loads').select('*').order('created_at',{ascending:true}),
+    db.from('demo_feed').select('*').order('created_at',{ascending:false})
+  ])
+  if(lr.error||fr.error){console.error(lr.error||fr.error);return}
+  loads=lr.data||[];hasNewLoad=loads.some(l=>l.status==='new');renderLoads()
+  const flt=el('feed-lt');if(flt)flt.innerHTML='';feedCounts.lt=0
+  ;(fr.data||[]).forEach((r: any)=>{renderFeedCard(r,'feed-lt',false);feedCounts.lt++})
+  if(activeTab==='lt'){const fc=el('feedCount');if(fc)fc.textContent=feedCounts.lt+' events'}
+}
+function subscribeRealtime(){
+  db.channel('demo-loads')
+    .on('postgres_changes',{event:'INSERT',schema:'public',table:'demo_loads'},(p: any)=>{
+      loads.unshift(p.new);hasNewLoad=true;renderLoads()
+      const k1=el('k1');if(k1)k1.textContent=String(parseInt(k1.textContent||'0')+1)
+      const k3=el('k3');if(k3)k3.textContent=String(parseInt(k3.textContent||'0')+1)
+    })
+    .on('postgres_changes',{event:'DELETE',schema:'public',table:'demo_loads'},(p: any)=>{
+      loads=loads.filter(l=>l.ref!==p.old.ref);hasNewLoad=loads.some(l=>l.status==='new');renderLoads()
+    })
+    .subscribe((status: string)=>{
+      const pill=el('statusPill'),txt=el('statusText')
+      if(status==='SUBSCRIBED'&&pill&&txt){pill.className='status-pill live';txt.textContent='Live'}
+    })
+  db.channel('demo-feed')
+    .on('postgres_changes',{event:'INSERT',schema:'public',table:'demo_feed'},(p: any)=>{renderFeedCard(p.new,'feed-lt',true);incFeed('lt')})
+    .on('postgres_changes',{event:'DELETE',schema:'public',table:'demo_feed'},()=>loadData())
+    .subscribe()
+}
+
+// ── LT call modal ─────────────────────────────────────────────
+function showCallModal(name: string,sub: string){
+  const cn=el('callName'),cs=el('callSub'),ct=el('callTimer'),ctr=el('callTranscript'),co=el('callOverlay')
+  if(cn)cn.textContent=name;if(cs)cs.textContent=sub
+  if(ct)ct.textContent='0:00';if(ctr)ctr.innerHTML=''
+  if(co)co.classList.add('visible')
+  let secs=0;if(callModalTimerInt)clearInterval(callModalTimerInt)
+  callModalTimerInt=setInterval(()=>{secs++;const m=Math.floor(secs/60),s=secs%60;if(ct)ct.textContent=m+':'+String(s).padStart(2,'0')},1000)
+}
+function hideCallModal(){if(callModalTimerInt)clearInterval(callModalTimerInt);const co=el('callOverlay');if(co)co.classList.remove('visible')}
+
+async function startCall(){
+  callState='connecting';setTopbarCallState('connecting');showError('');dbg('Starting LT call…')
+  try {
+    const LK=await getLK()
+    const room=newRoomName('lt')
+    const token=await makeParticipantToken(room)
+    dbg('Token ready · '+room)
+    lkRoom=new LK.Room({adaptiveStream:true,dynacast:true})
+    lkRoom.on(LK.RoomEvent.Disconnected,()=>{callState='idle';setTopbarCallState('idle');hideCallModal()})
+    lkRoom.on(LK.RoomEvent.TrackSubscribed,(track: any,_pub: any,participant: any)=>{
+      if(track.kind===LK.Track.Kind.Audio){const ae=track.attach();ae.dataset.lkParticipant=participant.sid;document.body.appendChild(ae);dbg('Audio attached')}
+    })
+    lkRoom.on(LK.RoomEvent.TrackUnsubscribed,(track: any)=>track.detach().forEach((e: any)=>e.remove()))
+    lkRoom.on(LK.RoomEvent.ActiveSpeakersChanged,(spk: any[])=>{if(activeTab==='lt')updateAudioBars(spk.some(p=>p!==lkRoom.localParticipant))})
+    await lkRoom.connect(LK_WS_URL,token);dbg('Connected')
+    if(typeof lkRoom.registerTextStreamHandler==='function'){
+      lkRoom.registerTextStreamHandler('lk.transcription',async(reader: any,pInfo: any)=>{
+        const attrs=(reader.info?.attributes)||{};const segId=attrs['lk.segment_id'],isFinal=attrs['lk.transcription_final']!=='false'
+        const isAgent=pInfo.identity!==lkRoom.localParticipant.identity;if(!segId&&!isFinal)return
+        try{const text=await reader.readAll();updateTranscriptEl(segId||('ts-'+Date.now()),text,isAgent,isFinal,'feed-lt')}catch(e){}
+      })
+      lkRoom.registerTextStreamHandler('lk.chat',async(reader: any,pInfo: any)=>{
+        const isAgent=pInfo.identity!==lkRoom.localParticipant.identity
+        try{const text=await reader.readAll();updateTranscriptEl('chat-'+Date.now(),text,isAgent,true,'feed-lt')}catch(e){}
+      })
+    }
+    await dispatchAgent(room,{use_case:'load_tender'})
+    await lkRoom.startAudio();await lkRoom.localParticipant.setMicrophoneEnabled(true)
+    callState='active';setTopbarCallState('active')
+    showCallModal('Incoming — Carrier on the line','Inbound · Load Tender');dbg('Call live')
+  } catch(err:any){dbg('ERROR: '+(err.message||err));callState='idle';setTopbarCallState('idle');showError(err.message||'Connection failed')}
+}
+async function endCall(){
+  if(lkRoom){await lkRoom.disconnect();lkRoom=null}
+  document.querySelectorAll('audio[data-lk-participant]').forEach((e:any)=>e.remove())
+  activeTranscripts.forEach(e=>e.classList.add('tx-done'));activeTranscripts.clear();modalTranscripts.clear()
+  callState='idle';setTopbarCallState('idle');hideCallModal()
+  if(hasNewLoad){const r=el('reset-btn');if(r)r.style.display='flex'}
+}
+async function toggleCall(){if(callState==='idle')await startCall();else if(callState==='active')await endCall()}
+
+// ── CC data ───────────────────────────────────────────────────
+function renderCCLoads(){
+  const demRefs=new Set(CC_DEMO_CARRIERS.map(c=>c.load))
+  const otherLoads=ccLoads.filter(l=>!demRefs.has(l.ref))
+  const doneCount=ccDoneSet.size
+  const pendingCount=CC_DEMO_CARRIERS.filter((_,i)=>!ccDoneSet.has(i)).length+otherLoads.filter(l=>l.status==='pending_check').length
+  const k2=el('cc-k2');if(k2)k2.textContent=String(doneCount+otherLoads.filter(l=>l.status==='confirmed').length)
+  const k3=el('cc-k3');if(k3)k3.textContent=String(pendingCount)
+  const cc=el('cc-count');if(cc)cc.textContent=(CC_DEMO_CARRIERS.length+otherLoads.length+1)+' carriers'
+  const body=el('cc-table-body');if(!body)return
+  let html=''
+  CC_DEMO_CARRIERS.forEach((c,i)=>{
+    const done=ccDoneSet.has(i),active=ccAutoRunning&&ccDemoIdx===i&&!done
+    const callSt=done?'completed':active?'in_progress':'not_called',st=done?'confirmed':'pending_check'
+    const isBreakdown=c.alertType==='driver_initiated_vehicle_breakdown'
+    const rowCls=done?' row-highlight':(!active&&isBreakdown?' cc-alert-row':'')
+    const statusCols=!done&&!active&&isBreakdown
+      ?`<div><span class="chip chip-danger"><span class="chip-dot"></span>Driver Initiated Alert</span></div><div><span class="chip chip-danger"><span class="chip-dot"></span>Vehicle Breakdown</span></div>`
+      :`<div>${callStatusChip(callSt)}</div><div>${statusChip(st)}</div>`
+    html+=`<div class="table-row cc-cols${rowCls}"><div><div class="cell-primary">${c.name}</div><div class="cell-ref">${c.load}</div></div><div class="cell-muted" style="font-size:var(--text-xs)">${c.route}</div><div class="cell-muted">${c.pickup}</div>${statusCols}</div>`
+  })
+  otherLoads.forEach(l=>{
+    html+=`<div class="table-row cc-cols${l.status==='confirmed'?' row-highlight':''}"><div><div class="cell-primary">${l.driver_name||l.carrier}</div><div class="cell-ref">${l.ref}</div></div><div class="cell-muted" style="font-size:var(--text-xs)">${l.route||(l.origin+' → '+l.destination)}</div><div class="cell-muted">${l.pickup_time}</div><div>${callStatusChip(l.call_status)}</div><div>${statusChip(l.status)}</div></div>`
+  })
+  html+=`<div class="cc-alert-sep"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 2L1.5 13.5h13L8 2z"/><path d="M8 7v3.5M8 12.5v.5" stroke-linecap="round"/></svg>Driver Alerts — Immediate Action Required</div>`
+  html+=`<div class="table-row cc-cols cc-warn-row"><div><div class="cell-primary">Tony Rivera</div><div class="cell-ref">CC-051</div></div><div class="cell-muted" style="font-size:var(--text-xs)">Houston TX → Baton Rouge LA</div><div class="cell-muted">Jun 21, 06:00 CT</div><div><span class="chip chip-warning"><span class="chip-dot"></span>Driver Initiated Alert</span></div><div><span class="chip chip-warning"><span class="chip-dot"></span>Load Not Staged · 2h+</span></div></div>`
+  body.innerHTML=html
+}
+async function loadCCData(){
+  const [lr,fr]=await Promise.all([
+    db.from('carrier_check_loads').select('*').order('created_at',{ascending:true}),
+    db.from('carrier_check_feed').select('*').order('created_at',{ascending:false})
+  ])
+  if(lr.error||fr.error){console.error(lr.error||fr.error);return}
+  ccLoads=lr.data||[];ccHasCallMade=ccLoads.some(l=>l.call_status==='completed')
+  const k1=el('cc-k1');if(k1)k1.textContent=String(ccLoads.filter(l=>l.call_status==='completed').length)
+  renderCCLoads()
+  const fcc=el('feed-cc');if(fcc)fcc.innerHTML='';feedCounts.cc=0
+  ;(fr.data||[]).forEach((r: any)=>{renderFeedCard(r,'feed-cc',false);feedCounts.cc++})
+  if(activeTab==='cc'){const fc=el('feedCount');if(fc)fc.textContent=feedCounts.cc+' events'}
+}
+function subscribeCCRealtime(){
+  db.channel('cc-loads')
+    .on('postgres_changes',{event:'*',schema:'public',table:'carrier_check_loads'},(p: any)=>{
+      if(p.eventType==='INSERT')ccLoads.push(p.new)
+      else if(p.eventType==='UPDATE'){
+        const i=ccLoads.findIndex(l=>l.id===p.new.id);if(i>-1)ccLoads[i]=p.new
+        if(p.new.call_status==='completed'&&p.new.call_summary&&!_ccFeedRefs.has(p.new.ref)){
+          _ccFeedRefs.add(p.new.ref)
+          const now=new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})
+          renderFeedCard({title:(p.new.driver_name||p.new.carrier)+' — Status Updated',who:'aria',time_str:now,quote:p.new.call_summary,badge_type:'auto',tool:'update_carrier_status'},'feed-cc',true);incFeed('cc')
+        }
+      } else if(p.eventType==='DELETE')ccLoads=ccLoads.filter(l=>l.id!==p.old.id)
+      ccHasCallMade=ccLoads.some(l=>l.call_status==='completed')
+      const k1=el('cc-k1');if(k1)k1.textContent=String(ccLoads.filter(l=>l.call_status==='completed').length)
+      renderCCLoads()
+    }).subscribe()
+  db.channel('cc-feed')
+    .on('postgres_changes',{event:'INSERT',schema:'public',table:'carrier_check_feed'},(p: any)=>{renderFeedCard(p.new,'feed-cc',true);incFeed('cc')})
+    .on('postgres_changes',{event:'DELETE',schema:'public',table:'carrier_check_feed'},()=>loadCCData())
+    .subscribe()
+}
+function syncCCBtn(){
+  const btn=el('call-btn'),lbl=el('call-label');if(!btn||!lbl)return
+  const active=ccCallState==='active'||ccAutoRunning
+  btn.className='btn-call'+(active?' call-active':ccCallState==='connecting'?' call-connecting':'')
+  ;(btn as HTMLButtonElement).disabled=ccCallState==='connecting'
+  lbl.textContent=ccCallState==='connecting'?'Connecting…':active?'End Sequence':'Initialize Use Case'
+}
+
+// ── CC call sequence ──────────────────────────────────────────
+function updateCCDemoDialer(){
+  const c=CC_DEMO_CARRIERS[ccDemoIdx];if(!c)return
+  const di=el('dialerInitial'),dn=el('dialerName'),dm=el('dialerMeta'),dc=el('dialerCurrent'),dt=el('dialerTotal'),dnx=el('dialerNext'),dti=el('dialerTimer'),dtr=el('dialerTranscript'),ldc=el('liveDialerCard')
+  if(di)di.textContent=c.initial;if(dn)dn.textContent=c.name;if(dm)dm.textContent=c.load+' · '+c.route
+  if(dc)dc.textContent=String(ccDemoIdx+1);if(dt)dt.textContent=String(CC_DEMO_CARRIERS.length)
+  const next=CC_DEMO_CARRIERS[ccDemoIdx+1];if(dnx)dnx.textContent=next?next.name:'Sequence Complete'
+  if(dti)dti.textContent='0:00';if(dtr)dtr.innerHTML='';ccDialerTxMap.clear()
+  if(ldc)ldc.classList.add('visible')
+}
+function ccInitializeUseCase(){
+  if(ccAutoRunning){stopCCSequence();return}
+  ccDemoIdx=0;ccDoneSet=new Set();_ccFeedRefs.clear()
+  const fcc=el('feed-cc');if(fcc)fcc.innerHTML='';feedCounts.cc=0
+  if(activeTab==='cc'){const fc=el('feedCount');if(fc)fc.textContent='0 events'}
+  updateCCDemoDialer();ccStartCallForCarrier(CC_DEMO_CARRIERS[0])
+}
+async function ccStartCallForCarrier(carrier: typeof CC_DEMO_CARRIERS[0]){
+  ccCallState='connecting';ccAutoRunning=true;syncCCBtn();showError('');dbg('CC → '+carrier.name)
+  const initBtn=el('cc-init-btn')
+  if(initBtn){initBtn.innerHTML='<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 3h2v10H5zM9 3h2v10H9z"/></svg> End Sequence';initBtn.classList.add('running')}
+  try {
+    const LK=await getLK()
+    const roomName=newRoomName('cc')
+    const token=await makeParticipantToken(roomName)
+    if(ccLkRoom){const old=ccLkRoom;ccLkRoom=null;await old.disconnect()}
+    ccTranscripts.forEach(e=>e.classList.add('tx-done'));ccTranscripts.clear();ccDialerTxMap.clear()
+    const thisRoom=new LK.Room({adaptiveStream:true,dynacast:true})
+    ccLkRoom=thisRoom
+    thisRoom.on(LK.RoomEvent.Disconnected,()=>{
+      if(ccLkRoom!==thisRoom)return
+      ccLkRoom=null;ccCallState='idle';if(ccDialerInt)clearInterval(ccDialerInt)
+      document.querySelectorAll('audio[data-lk-participant^="cc-"]').forEach((e:any)=>e.remove())
+      if(ccAutoRunning&&ccDemoIdx<CC_DEMO_CARRIERS.length-1)ccStartCountdownToNext()
+      else if(ccAutoRunning)ccSequenceComplete()
+    })
+    thisRoom.on(LK.RoomEvent.TrackSubscribed,(track: any,_pub: any,p: any)=>{
+      if(track.kind===LK.Track.Kind.Audio){const ae=track.attach();ae.dataset.lkParticipant='cc-'+p.sid;document.body.appendChild(ae);dbg('[CC] Audio attached — '+p.identity)}
+    })
+    thisRoom.on(LK.RoomEvent.TrackUnsubscribed,(track: any)=>track.detach().forEach((e: any)=>e.remove()))
+    thisRoom.on(LK.RoomEvent.ActiveSpeakersChanged,(spk: any[])=>{if(activeTab==='cc')updateAudioBars(spk.some(p=>p!==thisRoom.localParticipant))})
+    await thisRoom.connect(LK_WS_URL,token);dbg('[CC] Connected · '+carrier.name)
+    await thisRoom.startAudio();await thisRoom.localParticipant.setMicrophoneEnabled(true);dbg('[CC] Audio unlocked')
+    if(typeof thisRoom.registerTextStreamHandler==='function'){
+      thisRoom.registerTextStreamHandler('lk.transcription',async(reader: any,pInfo: any)=>{
+        const attrs=(reader.info?.attributes)||{};const segId=attrs['lk.segment_id'],isFinal=attrs['lk.transcription_final']!=='false'
+        const isAgent=pInfo.identity!==thisRoom.localParticipant.identity;if(!segId&&!isFinal)return
+        try{const text=await reader.readAll();ccUpdateTranscript(segId||('cc-'+Date.now()),text,isAgent,isFinal)}catch(e){}
+      })
+      thisRoom.registerTextStreamHandler('lk.chat',async(reader: any,pInfo: any)=>{
+        const isAgent=pInfo.identity!==thisRoom.localParticipant.identity
+        try{const text=await reader.readAll();ccUpdateTranscript('chat-'+Date.now(),text,isAgent,true)}catch(e){}
+      })
+    }
+    await dispatchAgent(roomName,{use_case:'carrier_check',driver_name:carrier.name,ref:carrier.load,route:carrier.route,gps_idle_mins:carrier.gpsIdleMins,alert_type:carrier.alertType})
+    ccCallState='active';syncCCBtn();if(ccDialerInt)clearInterval(ccDialerInt);ccDialerSecs=0
+    ccDialerInt=setInterval(()=>{ccDialerSecs++;const m=Math.floor(ccDialerSecs/60),s=ccDialerSecs%60;const dti=el('dialerTimer');if(dti)dti.textContent=m+':'+String(s).padStart(2,'0')},1000)
+    renderCCLoads();dbg('[CC] Live — '+carrier.name)
+  } catch(err:any){
+    dbg('[CC] ERROR: '+(err.message||err));ccCallState='idle';ccAutoRunning=false;syncCCBtn();showError(err.message||'CC call failed')
+    const b=el('cc-init-btn');if(b){b.innerHTML='<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M6 5.5l5 2.5-5 2.5V5.5z" fill="currentColor" stroke="none"/></svg> Initialize Use Case';b.classList.remove('running');(b as HTMLButtonElement).disabled=false}
+  }
+}
+function ccStartCountdownToNext(){
+  ccDoneSet.add(ccDemoIdx);renderCCLoads()
+  const nextCarrier=CC_DEMO_CARRIERS[ccDemoIdx+1];let secs=5
+  const dn=el('dialerName'),dm=el('dialerMeta'),dti=el('dialerTimer'),dtr=el('dialerTranscript'),ldc=el('liveDialerCard')
+  if(dn)dn.textContent='✓ '+CC_DEMO_CARRIERS[ccDemoIdx].name+' — Complete'
+  if(dm)dm.textContent='Calling '+nextCarrier.name+' in '+secs+'…'
+  if(dti)dti.textContent=String(secs);if(dtr)dtr.innerHTML='';ccDialerTxMap.clear()
+  if(ldc)ldc.classList.add('visible');if(ccCountdownInt)clearInterval(ccCountdownInt)
+  ccCountdownInt=setInterval(()=>{
+    secs--;if(secs>0){if(dm)dm.textContent='Calling '+nextCarrier.name+' in '+secs+'…';if(dti)dti.textContent=String(secs)}
+    else{if(ccCountdownInt)clearInterval(ccCountdownInt);ccDemoIdx++;ccDialerSecs=0;updateCCDemoDialer();renderCCLoads();ccStartCallForCarrier(CC_DEMO_CARRIERS[ccDemoIdx])}
+  },1000)
+}
+function ccSequenceComplete(){
+  ccDoneSet.add(ccDemoIdx);if(ccDialerInt)clearInterval(ccDialerInt);if(ccCountdownInt)clearInterval(ccCountdownInt)
   ccAutoRunning=false
-  if (ccDialerInt) clearInterval(ccDialerInt)
-  el('liveDialerCard').classList.remove('visible')
-  el('callBtnText').textContent = 'Initialize Use Case'
-  el('callBtn').classList.remove('active')
-  el('statusPill').className   = 'status-pill connecting'
-  el('statusText').textContent = 'Ready'
+  const dn=el('dialerName'),dm=el('dialerMeta'),dti=el('dialerTimer'),dnx=el('dialerNext'),ldc=el('liveDialerCard'),rst=el('reset-btn')
+  if(dn)dn.textContent='✓ Sequence Complete';if(dm)dm.textContent=CC_DEMO_CARRIERS.length+' carriers checked — demo done'
+  if(dti)dti.textContent='—';if(dnx)dnx.textContent='Done'
+  renderCCLoads();syncCCBtn()
+  const b=el('cc-init-btn');if(b){b.innerHTML='<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M6 5.5l5 2.5-5 2.5V5.5z" fill="currentColor" stroke="none"/></svg> Initialize Use Case';b.classList.remove('running');(b as HTMLButtonElement).disabled=false}
+  if(rst)rst.style.display='flex';setTimeout(()=>{if(ldc)ldc.classList.remove('visible')},4000)
+}
+function stopCCSequence(){
+  if(ccDialerInt)clearInterval(ccDialerInt);if(ccCountdownInt)clearInterval(ccCountdownInt);ccCountdownInt=null
+  ccDemoIdx=-1;ccDoneSet=new Set();ccAutoRunning=false;ccCallState='idle'
+  if(ccLkRoom){const r=ccLkRoom;ccLkRoom=null;r.disconnect()}
+  document.querySelectorAll('audio[data-lk-participant^="cc-"]').forEach((e:any)=>e.remove())
+  ccTranscripts.forEach(e=>e.classList.add('tx-done'));ccTranscripts.clear();ccDialerTxMap.clear()
+  const b=el('cc-init-btn');if(b){b.innerHTML='<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M6 5.5l5 2.5-5 2.5V5.5z" fill="currentColor" stroke="none"/></svg> Initialize Use Case';b.classList.remove('running');(b as HTMLButtonElement).disabled=false}
+  const ldc=el('liveDialerCard');if(ldc)ldc.classList.remove('visible');renderCCLoads();syncCCBtn()
+}
+async function resetCCDemo(){
+  await Promise.all([
+    db.from('carrier_check_loads').update({status:'pending_check',call_status:'not_called',eta_confirmed:null}).eq('is_demo_row',true),
+    db.from('carrier_check_calls').delete().eq('is_demo_row',true),
+    db.from('carrier_check_feed').delete().eq('is_demo_row',true)
+  ])
+  ccHasCallMade=false;const r=el('reset-btn');if(r)r.style.display='none';await loadCCData()
 }
 
-function toggleCall() {
-  if (activeTab==='cc') { ccAutoRunning ? stopCCSequence() : startCCSequence(); return }
-  if (callActive) { endCall(); return }
-  startCall()
+// ── AR data & call ────────────────────────────────────────────
+function fmtDollars(n: any){return n?'$'+Number(n).toLocaleString('en-US',{maximumFractionDigits:0}):'$0'}
+function renderARAccounts(){
+  const promised=arAccounts.filter(a=>a.status==='payment_promised')
+  const collected=arAccounts.filter(a=>a.status==='paid')
+  const k2=el('ar-k2');if(k2)k2.textContent=fmtDollars(promised.reduce((s: number,a: any)=>s+Number(a.amount_due||0),0)).replace('$','')
+  const k3=el('ar-k3');if(k3)k3.textContent=fmtDollars(collected.reduce((s: number,a: any)=>s+Number(a.amount_due||0),0)).replace('$','')
+  const ac=el('ar-count');if(ac)ac.textContent=arAccounts.length+' accounts'
+  const body=el('ar-table-body');if(!body)return
+  if(!arAccounts.length){body.innerHTML='<div class="feed-empty">No accounts found.</div>';return}
+  body.innerHTML=arAccounts.map((a: any)=>`<div class="table-row ar-cols${a.status==='payment_promised'||a.status==='paid'?' row-highlight':''}"><div><div class="cell-primary">${a.customer}</div><div class="cell-ref">${a.invoice_no}</div></div><div class="cell-amount">$${Number(a.amount_due).toLocaleString()}</div><div style="color:${a.days_overdue>60?'var(--danger-fg)':a.days_overdue>30?'var(--warning-fg)':'var(--text-muted)'}">${a.days_overdue}d</div><div>${callStatusChip(a.call_status)}</div><div>${statusChip(a.status)}</div></div>`).join('')
+}
+async function loadARData(){
+  const [ar,fr]=await Promise.all([
+    db.from('ar_accounts').select('*').order('days_overdue',{ascending:false}),
+    db.from('ar_feed').select('*').order('created_at',{ascending:false})
+  ])
+  if(ar.error||fr.error){console.error(ar.error||fr.error);return}
+  arAccounts=ar.data||[];arHasCallMade=arAccounts.some((a: any)=>a.call_status==='completed')
+  const k1=el('ar-k1');if(k1)k1.textContent=String(arAccounts.filter((a: any)=>a.call_status==='completed').length)
+  renderARAccounts()
+  const far=el('feed-ar');if(far)far.innerHTML='';feedCounts.ar=0
+  ;(fr.data||[]).forEach((r: any)=>{renderFeedCard(r,'feed-ar',false);feedCounts.ar++})
+  if(activeTab==='ar'){const fc=el('feedCount');if(fc)fc.textContent=feedCounts.ar+' events'}
+}
+function subscribeARRealtime(){
+  db.channel('ar-accounts')
+    .on('postgres_changes',{event:'*',schema:'public',table:'ar_accounts'},(p: any)=>{
+      if(p.eventType==='UPDATE'){const i=arAccounts.findIndex((a: any)=>a.id===p.new.id);if(i>-1)arAccounts[i]=p.new}
+      else if(p.eventType==='INSERT')arAccounts.push(p.new)
+      else if(p.eventType==='DELETE')arAccounts=arAccounts.filter((a: any)=>a.id!==p.old.id)
+      arHasCallMade=arAccounts.some((a: any)=>a.call_status==='completed')
+      const k1=el('ar-k1');if(k1)k1.textContent=String(arAccounts.filter((a: any)=>a.call_status==='completed').length)
+      renderARAccounts()
+    }).subscribe()
+  db.channel('ar-feed')
+    .on('postgres_changes',{event:'INSERT',schema:'public',table:'ar_feed'},(p: any)=>{renderFeedCard(p.new,'feed-ar',true);incFeed('ar')})
+    .on('postgres_changes',{event:'DELETE',schema:'public',table:'ar_feed'},()=>loadARData())
+    .subscribe()
+}
+function syncARBtn(){
+  const btn=el('call-btn'),lbl=el('call-label');if(!btn||!lbl)return
+  btn.className='btn-call'+(arCallState==='active'?' call-active':arCallState==='connecting'?' call-connecting':'')
+  ;(btn as HTMLButtonElement).disabled=arCallState==='connecting'
+  lbl.textContent=arCallState==='active'?'End Call':arCallState==='connecting'?'Connecting…':TAB_BTN_LABEL.ar
+}
+async function arStartCall(){
+  arCallState='connecting';syncARBtn();showError('');dbg('Starting AR call…')
+  try {
+    const LK=await getLK()
+    const room=newRoomName('ar');const token=await makeParticipantToken(room)
+    arLkRoom=new LK.Room({adaptiveStream:true,dynacast:true})
+    arLkRoom.on(LK.RoomEvent.Disconnected,()=>{arCallState='idle';syncARBtn();hideCallModal()})
+    arLkRoom.on(LK.RoomEvent.TrackSubscribed,(track: any,_pub: any,p: any)=>{
+      if(track.kind===LK.Track.Kind.Audio){const ae=track.attach();ae.dataset.lkParticipant='ar-'+p.sid;document.body.appendChild(ae)}
+    })
+    arLkRoom.on(LK.RoomEvent.TrackUnsubscribed,(track: any)=>track.detach().forEach((e: any)=>e.remove()))
+    arLkRoom.on(LK.RoomEvent.ActiveSpeakersChanged,(spk: any[])=>{if(activeTab==='ar')updateAudioBars(spk.some(p=>p!==arLkRoom.localParticipant))})
+    await arLkRoom.connect(LK_WS_URL,token);dbg('[AR] Connected')
+    if(typeof arLkRoom.registerTextStreamHandler==='function'){
+      arLkRoom.registerTextStreamHandler('lk.transcription',async(reader: any,pInfo: any)=>{
+        const attrs=(reader.info?.attributes)||{};const segId=attrs['lk.segment_id'],isFinal=attrs['lk.transcription_final']!=='false'
+        const isAgent=pInfo.identity!==arLkRoom.localParticipant.identity;if(!segId&&!isFinal)return
+        try{const text=await reader.readAll();arUpdateTranscript(segId||('ar-'+Date.now()),text,isAgent,isFinal)}catch(e){}
+      })
+      arLkRoom.registerTextStreamHandler('lk.chat',async(reader: any,pInfo: any)=>{
+        const isAgent=pInfo.identity!==arLkRoom.localParticipant.identity
+        try{const text=await reader.readAll();arUpdateTranscript('chat-'+Date.now(),text,isAgent,true)}catch(e){}
+      })
+    }
+    await dispatchAgent(room,{use_case:'ar_collections'})
+    await arLkRoom.startAudio();await arLkRoom.localParticipant.setMicrophoneEnabled(true)
+    arCallState='active';syncARBtn();showCallModal('AR Collections — Aria','Outbound · AR Collections');dbg('[AR] Live')
+  } catch(err:any){dbg('[AR] ERROR: '+(err.message||err));arCallState='idle';syncARBtn();showError(err.message||'AR call failed')}
+}
+async function arEndCall(){
+  if(arLkRoom){await arLkRoom.disconnect();arLkRoom=null}
+  document.querySelectorAll('audio[data-lk-participant^="ar-"]').forEach((e:any)=>e.remove())
+  arTranscripts.forEach(e=>e.classList.add('tx-done'));arTranscripts.clear()
+  arCallState='idle';syncARBtn();hideCallModal()
+  if(arHasCallMade){const r=el('reset-btn');if(r)r.style.display='flex'}
+}
+async function resetARDemo(){
+  await Promise.all([
+    db.from('ar_accounts').update({status:'pending_call',call_status:'not_called',payment_date:null}).eq('is_demo_row',true),
+    db.from('ar_feed').delete().eq('is_demo_row',true)
+  ])
+  arHasCallMade=false;const r=el('reset-btn');if(r)r.style.display='none';await loadARData()
+}
+async function resetDemo(){
+  await Promise.all([db.from('demo_loads').delete().eq('is_demo_row',true),db.from('demo_feed').delete().eq('is_demo_row',true)])
+  hasNewLoad=false;const r=el('reset-btn');if(r)r.style.display='none';await loadData()
 }
 
-function resetDashboard() {
-  arRows=[]; feedItems=[]
-  driverData.forEach(d=>{ d.status='pending'; d.checkedAt='' })
-  if (ccAutoRunning) stopCCSequence()
-  el('liveDialerCard').classList.remove('visible')
-  if (ccLiveData.length) {
-    ccLiveData.forEach((row: LiveRow) =>
-      _sb.from('carrier_check_loads').update({ call_status:'not_called', status:'pending_check', call_summary:null }).eq('ref', row.ref)
-    )
-    setTimeout(loadCCLive, 600)
-  }
-  el('cc-count').textContent     = '0 of '+driverData.length+' drivers'
-  el('lt-calls').textContent     = '12'
-  el('lt-actions').textContent   = '9'
-  el('lt-contained').textContent = '91'
-  el('cc-calls').textContent     = '0'
-  el('cc-confirmed').textContent = '0'
-  el('cc-pending').textContent   = '0'
-  el('ar-calls').textContent     = '0'
-  el('ar-promised').textContent  = '0'
-  el('ar-collected').textContent = '0'
-  renderDriverTable(); renderAR(); renderFeed()
+// ── Tab switching ─────────────────────────────────────────────
+function switchTab(tab: string){
+  activeTab=tab
+  ;['lt','cc','ar'].forEach(t=>{
+    const btn=el('t'+(t==='lt'?1:t==='cc'?2:3)),panel=el('panel-'+t),feed=el('feed-'+t)
+    if(btn)btn.className='tab-btn'+(t===tab?' active':'')
+    if(panel)panel.style.display=t===tab?'flex':'none'
+    if(feed)feed.style.display=t===tab?'flex':'none'
+  })
+  const titles={lt:'Load Tender Feed',cc:'Carrier Check Feed',ar:'AR Collections Feed'}
+  const ft=el('feedTitle'),fc=el('feedCount')
+  if(ft)ft.textContent=titles[tab as keyof typeof titles]
+  const n=feedCounts[tab as keyof typeof feedCounts]
+  if(fc)fc.textContent=n+' event'+(n!==1?'s':'')
+  if(tab==='lt')setTopbarCallState(callState)
+  else if(tab==='cc')syncCCBtn()
+  else syncARBtn()
 }
+function activeToggleCall(){
+  if(activeTab==='lt')toggleCall()
+  else if(activeTab==='cc'){if(ccAutoRunning)stopCCSequence();else ccInitializeUseCase()}
+  else arStartCall()
+}
+function activeEndCall(){if(activeTab==='lt')endCall();else if(activeTab==='ar')arEndCall();else hideCallModal()}
+function activeResetDemo(){if(activeTab==='lt')resetDemo();else if(activeTab==='cc')resetCCDemo();else resetARDemo()}
 
-// ── COMPONENT ─────────────────────────────────────────
-export default function Dashboard() {
+// ── React component ───────────────────────────────────────────
+export default function Page() {
   useEffect(() => {
-    renderLT()
-    renderAR()
-    loadCCLive()
-
-    const channel = _sb.channel('cc-realtime')
-      .on('postgres_changes', { event:'*', schema:'public', table:'carrier_check_loads' }, () => loadCCLive())
-      .subscribe()
-
-    setTimeout(() => {
-      el('statusPill').className   = 'status-pill connecting'
-      el('statusText').textContent = 'Ready'
-    }, 1500)
-
-    setTimeout(() => {
-      addFeedItem('Load Tender · LT-8821', 'Aria reached Apex Freight Co. Load confirmed — Chicago → Dallas, Jun 19, $2,400.', [['Confirmed','chip-success'],['$2,400','chip-info']])
-      addFeedItem('Load Tender · LT-8823', 'Eagle Logistics accepted Atlanta → Miami load. Rate confirmed at $3,100.',          [['Confirmed','chip-success'],['$3,100','chip-info']])
-      addFeedItem('Load Tender · LT-8824', 'Titan Transport requested callback. Load LT-8824 Denver → Phoenix pending.',        [['Callback Requested','chip-warning']])
-      addFeedItem('Load Tender · LT-8826', 'Pacific Haul declined LA → Las Vegas at $980. Seeking alternative carrier.',        [['Declined','chip-danger']])
-      renderFeed()
-    }, 600)
-
-    return () => { _sb.removeChannel(channel) }
+    loadData(); subscribeRealtime()
+    loadCCData(); subscribeCCRealtime()
+    loadARData(); subscribeARRealtime()
+    setTimeout(()=>{
+      const pill=el('statusPill'),txt=el('statusText')
+      if(pill&&txt&&pill.className.includes('connecting')){pill.className='status-pill idle';txt.textContent='Ready'}
+    },3000)
   }, [])
 
   return (
     <>
       <header className="topbar">
         <a className="topbar-logo" href="#">
-          <div className="logo-mark" style={{background:'var(--blue-600)'}}>
+          <div className="logo-mark">
             <svg width="15" height="15" viewBox="0 0 28 28" fill="none">
-              <path d="M16.2 2.5 6.4 15.1c-.5.64-.04 1.57.77 1.57h4.06l-1.6 8.06c-.18.9.97 1.43 1.53.7L21.6 12.4c.5-.65.04-1.58-.77-1.58h-4.2l1.65-7.55c.2-.9-.94-1.46-1.5-.77Z" fill="#fff" />
+              <path d="M16.2 2.5 6.4 15.1c-.5.64-.04 1.57.77 1.57h4.06l-1.6 8.06c-.18.9.97 1.43 1.53.7L21.6 12.4c.5-.65.04-1.58-.77-1.58h-4.2l1.65-7.55c.2-.9-.94-1.46-1.5-.77Z" fill="#fff"/>
             </svg>
           </div>
           <span className="logo-text">TRAK</span>
-          <span className="logo-sub">by Flowgentic</span>
+          <span className="logo-sub">&nbsp;by Flowgentic</span>
         </a>
         <div className="topbar-divider"></div>
         <span className="topbar-client">CSA Demo</span>
@@ -543,36 +645,39 @@ export default function Dashboard() {
           <span className="status-dot"></span>
           <span id="statusText">Connecting…</span>
         </div>
-        <button className="btn-call" id="callBtn" onClick={() => toggleCall()}>
+        <button className="btn-call" id="call-btn" onClick={()=>activeToggleCall()}>
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
             <path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h1.38a1.5 1.5 0 0 1 1.429 1.035l.5 1.5a1.5 1.5 0 0 1-.418 1.59l-.558.49a7.518 7.518 0 0 0 3.952 3.952l.49-.558a1.5 1.5 0 0 1 1.59-.418l1.5.5A1.5 1.5 0 0 1 14 11.62V13a1.5 1.5 0 0 1-1.5 1.5C6.201 14.5 1.5 9.799 1.5 3.5Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
             <path d="M10 2l1.5 1.5L10 5M11.5 3.5H8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
-          <span id="callBtnText">Initialize Use Case</span>
+          <span id="call-label">Initialize Use Case</span>
         </button>
-        <button className="btn-reset" onClick={() => resetDashboard()}>
+        <button className="btn-reset" id="reset-btn" onClick={()=>activeResetDemo()} style={{display:'none'}}>
           <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
             <path d="M2 7A5 5 0 1 0 7 2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
             <path d="M7 2 5 4.5 7.5 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
           Reset
         </button>
+        <div className="audio-bars">
+          {[0,1,2,3].map(i=><div key={i} className="audio-bar" style={{animationDelay:`${i*0.1}s`}}></div>)}
+        </div>
       </header>
 
       <div className="tabs-bar">
-        <button className="tab-btn active" onClick={(e) => switchTab('lt', e.currentTarget as HTMLElement)}>
+        <button className="tab-btn" id="t1" onClick={()=>switchTab('lt')}>
           <svg className="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
             <rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M5 7h6M5 10h4"/>
           </svg>
           Load Tender
         </button>
-        <button className="tab-btn" onClick={(e) => switchTab('cc', e.currentTarget as HTMLElement)}>
+        <button className="tab-btn active" id="t2" onClick={()=>switchTab('cc')}>
           <svg className="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M2 8h3l2-5 3 10 2-5h2"/>
           </svg>
           Track &amp; Trace
         </button>
-        <button className="tab-btn" onClick={(e) => switchTab('ar', e.currentTarget as HTMLElement)}>
+        <button className="tab-btn" id="t3" onClick={()=>switchTab('ar')}>
           <svg className="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M8 2v12M5 5h4.5a1.5 1.5 0 0 1 0 3H6a1.5 1.5 0 0 0 0 3H11"/>
           </svg>
@@ -584,116 +689,94 @@ export default function Dashboard() {
         <div className="left-panel">
 
           {/* LOAD TENDER */}
-          <div id="panel-lt" className="tab-panel active" style={{display:'flex',flexDirection:'column',gap:'var(--space-5)'}}>
-            <div style={{background:'var(--info-bg)',border:'1px solid var(--blue-100)',borderRadius:'var(--radius-md)',padding:'var(--space-3) var(--space-4)',display:'flex',alignItems:'center',gap:'var(--space-3)',fontSize:'var(--text-sm)',color:'var(--info-fg)'}}>
+          <div id="panel-lt" style={{display:'none',flexDirection:'column',gap:'var(--space-5)'}}>
+            <div className="info-banner">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" style={{flexShrink:0}}><circle cx="8" cy="8" r="5.5"/><path d="M8 7v4M8 5v.5" strokeLinecap="round"/></svg>
               <span><strong>Inbound agent.</strong> Carriers call Aria to book load tenders — Aria handles the conversation end-to-end without a human dispatcher.</span>
             </div>
             <div className="metrics-row">
               <div className="metric-card highlight">
-                <div className="metric-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M13 3.5A1.5 1.5 0 0 0 11.5 2h-1.38a1.5 1.5 0 0 0-1.429 1.035l-.5 1.5a1.5 1.5 0 0 0 .418 1.59l.558.49a7.518 7.518 0 0 1-3.952 3.952l-.49-.558a1.5 1.5 0 0 0-1.59-.418l-1.5.5A1.5 1.5 0 0 0 1 11.62V13a1.5 1.5 0 0 0 1.5 1.5c6.299 0 11-4.701 11-10.5V3.5Z"/></svg></div>
-                <div className="metric-eyebrow">Tenders Received</div>
-                <div className="metric-desc">Inbound calls from carriers booking loads today</div>
-                <div className="metric-value" id="lt-calls">12</div>
-                <div className="metric-delta delta-up">↑ 4 more than yesterday</div>
+                <div className="metric-eyebrow">Calls Today</div><div className="metric-desc">Inbound calls from carriers booking loads</div>
+                <div className="metric-value" id="k1">12</div><div className="metric-delta delta-up">↑ 4 more than yesterday</div>
               </div>
               <div className="metric-card">
-                <div className="metric-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="8" cy="8" r="5.5"/><path d="M5.5 8l2 2 3-3"/></svg></div>
-                <div className="metric-eyebrow">AI Handle Rate</div>
-                <div className="metric-desc">Inbound calls closed by Aria — no dispatcher needed</div>
-                <div className="contained-wrap">
-                  <div><div className="metric-value"><span id="lt-contained">91</span><span className="metric-unit">%</span></div></div>
-                  <svg className="donut-svg" viewBox="0 0 52 52">
-                    <circle cx="26" cy="26" r="20" fill="none" stroke="var(--border-subtle)" strokeWidth="5"/>
-                    <circle id="lt-donut" cx="26" cy="26" r="20" fill="none" stroke="var(--amber-500)" strokeWidth="5" strokeDasharray="114.6 125.7" strokeDashoffset="31.4" strokeLinecap="round" transform="rotate(-90 26 26)"/>
-                  </svg>
-                </div>
+                <div className="metric-eyebrow">AI Handle Rate</div><div className="metric-desc">Calls closed by Aria — no dispatcher needed</div>
+                <div className="metric-value"><span id="k2">91</span><span className="metric-unit">%</span></div>
                 <div className="metric-delta delta-up">↑ 2 points vs last week</div>
               </div>
               <div className="metric-card">
-                <div className="metric-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M3 8h10M9 4l4 4-4 4"/></svg></div>
-                <div className="metric-eyebrow">Bookings Completed</div>
-                <div className="metric-desc">Loads successfully booked by Aria on this call</div>
-                <div className="metric-value" id="lt-actions">9</div>
-                <div className="metric-delta delta-flat">of 12 inbound calls resulted in a booking</div>
+                <div className="metric-eyebrow">Actions Taken</div><div className="metric-desc">Loads booked or actions completed by Aria</div>
+                <div className="metric-value" id="k3">9</div><div className="metric-delta delta-flat">of 12 calls resulted in a booking</div>
               </div>
             </div>
             <div>
-              <div className="section-header" style={{marginBottom:'var(--space-3)'}}>
-                <div className="section-title">Load Tenders</div>
-                <span className="section-badge" id="lt-count">12 loads</span>
+              <div className="section-hdr">
+                <div className="section-title">Active Loads — Saturn Freight Systems</div>
+                <span className="section-badge" id="lt-count">—</span>
               </div>
-              <div className="table-card lt-table">
-                <div className="table-head">
-                  <span>Shipper / Load ID</span><span>Origin → Dest</span><span>Pickup</span><span>Rate</span><span>Status</span>
-                </div>
-                <div id="lt-table-body"></div>
+              <div className="table-card">
+                <div className="table-head lt-cols"><span>Shipper / Ref</span><span>Route</span><span>Service</span><span>Status</span><span>Created By</span></div>
+                <div id="lt-table-body"><div className="feed-empty">Connecting to Supabase…</div></div>
               </div>
             </div>
           </div>
 
           {/* TRACK & TRACE */}
-          <div id="panel-cc" style={{display:'none',flexDirection:'column',gap:'var(--space-5)'}}>
-            <div style={{background:'var(--surface-brand-tint)',border:'1px solid var(--amber-100)',borderRadius:'var(--radius-md)',padding:'var(--space-3) var(--space-4)',display:'flex',alignItems:'center',gap:'var(--space-3)',fontSize:'var(--text-sm)',color:'var(--text-brand)'}}>
+          <div id="panel-cc" style={{display:'flex',flexDirection:'column',gap:'var(--space-5)'}}>
+            <div className="brand-banner">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" style={{flexShrink:0}}><path d="M2 8h3l2-5 3 10 2-5h2"/></svg>
-              <span><strong>Outbound auto-dialer.</strong> Aria calls each active driver in sequence, logs their location &amp; ETA, then moves to the next automatically — no dispatcher needed.</span>
+              <span><strong>Outbound auto-dialer.</strong> Aria calls each carrier in sequence, logs status &amp; ETA, then moves to the next — no dispatcher needed.</span>
+            </div>
+            <div style={{display:'flex',alignItems:'center',gap:'var(--space-3)'}}>
+              <button className="btn-init-uc" id="cc-init-btn" onClick={()=>ccInitializeUseCase()}>
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <circle cx="8" cy="8" r="6"/><path d="M6 5.5l5 2.5-5 2.5V5.5z" fill="currentColor" stroke="none"/>
+                </svg>
+                Initialize Use Case
+              </button>
+              <span style={{fontSize:'var(--text-xs)',color:'var(--text-muted)'}}>Auto-dials Marcus Webb → Sandra Patel</span>
             </div>
             <div className="metrics-row">
               <div className="metric-card">
-                <div className="metric-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M3.5 2A1.5 1.5 0 0 0 2 3.5c0 5.799 4.701 10.5 10.5 10.5A1.5 1.5 0 0 0 14 12.5v-1.38a1.5 1.5 0 0 0-1.035-1.429l-1.5-.5a1.5 1.5 0 0 0-1.59.418l-.49.558a7.518 7.518 0 0 1-3.952-3.952l.558-.49a1.5 1.5 0 0 0 .418-1.59l-.5-1.5A1.5 1.5 0 0 0 4.88 2H3.5Z"/></svg></div>
-                <div className="metric-eyebrow">Drivers Called</div>
-                <div className="metric-desc">Check-in calls placed by Aria this session</div>
-                <div className="metric-value" id="cc-calls">0</div>
-                <div className="metric-delta delta-flat">Press Initialize to start sequence</div>
+                <div className="metric-eyebrow">Calls Made</div><div className="metric-desc">Check-in calls placed by Aria</div>
+                <div className="metric-value" id="cc-k1">0</div><div className="metric-delta delta-flat">Press Initialize to start</div>
               </div>
               <div className="metric-card">
-                <div className="metric-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="8" cy="8" r="5.5"/><path d="M5.5 8l2 2 3-3"/></svg></div>
-                <div className="metric-eyebrow">Check-ins Logged</div>
-                <div className="metric-desc">Drivers confirmed location &amp; ETA with Aria</div>
-                <div className="metric-value" id="cc-confirmed">0</div>
-                <div className="metric-delta delta-flat">Acknowledged &amp; on track</div>
+                <div className="metric-eyebrow">Confirmed</div><div className="metric-desc">Carriers confirmed location &amp; ETA</div>
+                <div className="metric-value" id="cc-k2">0</div><div className="metric-delta delta-flat">On track</div>
               </div>
               <div className="metric-card">
-                <div className="metric-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3M8 11v.5"/></svg></div>
-                <div className="metric-eyebrow">No Answer</div>
-                <div className="metric-desc">Driver did not pick up — voicemail left</div>
-                <div className="metric-value" id="cc-pending">0</div>
-                <div className="metric-delta delta-flat">Flagged for manual follow-up</div>
+                <div className="metric-eyebrow">Pending</div><div className="metric-desc">Awaiting callback or no answer</div>
+                <div className="metric-value" id="cc-k3">0</div><div className="metric-delta delta-flat">Flagged for follow-up</div>
               </div>
             </div>
-
             <div className="live-dialer-card" id="liveDialerCard">
               <div className="dialer-top">
-                <div className="dialer-avatar"><span id="dialerInitial">M</span><div className="dialer-avatar-ring"></div></div>
+                <div className="dialer-avatar"><span id="dialerInitial">A</span><div className="dialer-avatar-ring"></div></div>
                 <div className="dialer-info">
                   <div className="dialer-badge"><span className="dialer-badge-dot"></span>Aria is calling</div>
-                  <div className="dialer-name" id="dialerName">Driver Name</div>
-                  <div className="dialer-meta" id="dialerMeta">TRK-000 · Load · Route</div>
+                  <div className="dialer-name" id="dialerName">—</div>
+                  <div className="dialer-meta" id="dialerMeta">—</div>
                 </div>
                 <div className="dialer-waveform">
-                  {[0,.15,.3,.45,.6,.75].map((d,i) => <div key={i} className="dialer-wave-bar" style={{animationDelay:`${d}s`}}></div>)}
+                  {[0,.15,.3,.45,.6].map((d,i)=><div key={i} className="dialer-wave-bar" style={{animationDelay:`${d}s`}}></div>)}
                 </div>
                 <div className="dialer-timer" id="dialerTimer">0:00</div>
               </div>
               <div className="dialer-transcript" id="dialerTranscript"></div>
               <div className="dialer-progress-row">
-                <span className="dialer-progress-text">Driver <strong id="dialerCurrent">1</strong> of <strong id="dialerTotal">6</strong></span>
-                <span className="dialer-next-text">Next up: <strong id="dialerNext">—</strong></span>
+                <span className="dialer-progress-text">Carrier <strong id="dialerCurrent">1</strong> of <strong id="dialerTotal">—</strong></span>
+                <span className="dialer-next-text">Next: <strong id="dialerNext">—</strong></span>
               </div>
             </div>
-
             <div>
-              <div className="section-header" style={{marginBottom:'var(--space-3)'}}>
-                <div className="section-title">Driver Check-in Log</div>
-                <span className="section-badge" id="cc-count">0 of 6 drivers</span>
+              <div className="section-hdr">
+                <div className="section-title">Carrier Check Log</div>
+                <span className="section-badge" id="cc-count">—</span>
               </div>
-              <div className="table-card tt-table">
-                <div className="table-head">
-                  <span>Driver</span><span>Phone</span><span>Route / Ref</span><span>Location / ETA</span><span>Call Summary</span><span>Alert</span><span>Status</span>
-                </div>
-                <div id="cc-table-body">
-                  <div className="feed-empty">Click <strong>Initialize Use Case</strong> to begin auto check-in sequence.</div>
-                </div>
+              <div className="table-card">
+                <div className="table-head cc-cols"><span>Carrier / Ref</span><span>Route</span><span>Pickup</span><span>Call Status</span><span>Outcome</span></div>
+                <div id="cc-table-body"><div className="feed-empty">Loading carrier data…</div></div>
               </div>
             </div>
           </div>
@@ -702,63 +785,50 @@ export default function Dashboard() {
           <div id="panel-ar" style={{display:'none',flexDirection:'column',gap:'var(--space-5)'}}>
             <div className="metrics-row">
               <div className="metric-card">
-                <div className="metric-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M3.5 2A1.5 1.5 0 0 0 2 3.5c0 5.799 4.701 10.5 10.5 10.5A1.5 1.5 0 0 0 14 12.5v-1.38a1.5 1.5 0 0 0-1.035-1.429l-1.5-.5a1.5 1.5 0 0 0-1.59.418l-.49.558a7.518 7.518 0 0 1-3.952-3.952l.558-.49a1.5 1.5 0 0 0 .418-1.59l-.5-1.5A1.5 1.5 0 0 0 4.88 2H3.5Z"/></svg></div>
-                <div className="metric-eyebrow">Debtors Contacted</div>
-                <div className="metric-desc">Outbound collection calls placed this session</div>
-                <div className="metric-value" id="ar-calls">0</div>
-                <div className="metric-delta delta-flat">Press Call Aria to start collecting</div>
+                <div className="metric-eyebrow">Calls Made</div><div className="metric-desc">Collection calls placed this session</div>
+                <div className="metric-value" id="ar-k1">0</div><div className="metric-delta delta-flat">Press Call Aria to start</div>
               </div>
               <div className="metric-card">
-                <div className="metric-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M8 2v12M5 5h4.5a1.5 1.5 0 0 1 0 3H6a1.5 1.5 0 0 0 0 3H11"/></svg></div>
-                <div className="metric-eyebrow">Promise to Pay</div>
-                <div className="metric-desc">Total $ debtors verbally committed to send</div>
-                <div className="metric-value"><span className="metric-unit">$</span><span id="ar-promised">0</span></div>
-                <div className="metric-delta delta-flat">Verbal commitments secured</div>
+                <div className="metric-eyebrow">Promise to Pay</div><div className="metric-desc">Verbal commitments secured by Aria</div>
+                <div className="metric-value"><span className="metric-unit">$</span><span id="ar-k2">0</span></div>
+                <div className="metric-delta delta-flat">Committed</div>
               </div>
               <div className="metric-card">
-                <div className="metric-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="8" cy="8" r="5.5"/><path d="M5.5 8l2 2 3-3"/></svg></div>
-                <div className="metric-eyebrow">Cash Collected</div>
-                <div className="metric-desc">Payments confirmed received in this session</div>
-                <div className="metric-value"><span className="metric-unit">$</span><span id="ar-collected">0</span></div>
-                <div className="metric-delta delta-flat">Actual money in</div>
+                <div className="metric-eyebrow">Collected</div><div className="metric-desc">Payments confirmed received</div>
+                <div className="metric-value"><span className="metric-unit">$</span><span id="ar-k3">0</span></div>
+                <div className="metric-delta delta-flat">Cash in</div>
               </div>
             </div>
             <div>
-              <div className="section-header" style={{marginBottom:'var(--space-3)'}}>
-                <div className="section-title">AR Collections Log</div>
-                <span className="section-badge" id="ar-count">0 accounts</span>
+              <div className="section-hdr">
+                <div className="section-title">AR Accounts — Saturn Freight Systems</div>
+                <span className="section-badge" id="ar-count">—</span>
               </div>
-              <div className="table-card ar-table">
-                <div className="table-head">
-                  <span>Debtor / Invoice</span><span>Balance</span><span>Days O/D</span><span>Called At</span><span>Outcome</span>
-                </div>
-                <div id="ar-table-body">
-                  <div className="feed-empty">No collection calls yet. Click <strong>Call Aria</strong> to begin.</div>
-                </div>
+              <div className="table-card">
+                <div className="table-head ar-cols"><span>Customer / Invoice</span><span>Amount Due</span><span>Days O/D</span><span>Call Status</span><span>Outcome</span></div>
+                <div id="ar-table-body"><div className="feed-empty">Loading AR data…</div></div>
               </div>
             </div>
           </div>
 
         </div>
 
-        {/* RIGHT — FEED */}
         <div className="right-panel">
           <div className="feed-header">
-            <span className="feed-title" id="feedTitle">Activity Feed</span>
+            <span className="feed-title" id="feedTitle">Carrier Check Feed</span>
             <span className="feed-count" id="feedCount">0 events</span>
           </div>
-          <div className="feed-body" id="feedBody">
-            <div className="feed-empty">Connecting to Supabase…</div>
-          </div>
+          <div className="feed-body" id="feed-lt" style={{display:'none'}}></div>
+          <div className="feed-body" id="feed-cc"></div>
+          <div className="feed-body" id="feed-ar" style={{display:'none'}}></div>
         </div>
       </div>
 
-      {/* CALL MODAL */}
       <div className="call-overlay" id="callOverlay">
         <div className="call-modal">
           <div className="call-modal-header">
-            <span className="call-modal-title">Live Call</span>
-            <button className="call-close" onClick={() => endCall()}>
+            <span className="call-modal-title">Live Call — Aria</span>
+            <button className="call-close" onClick={()=>activeEndCall()}>
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 4l8 8M12 4l-8 8"/></svg>
             </button>
           </div>
@@ -768,21 +838,19 @@ export default function Dashboard() {
             </svg>
           </div>
           <div className="call-name" id="callName">Aria</div>
-          <div className="call-sub"  id="callSub">Outbound · Load Tender</div>
+          <div className="call-sub" id="callSub">Live Call</div>
           <div className="call-timer" id="callTimer">0:00</div>
-          <div className="call-waveform" id="callWave">
-            {[0,.12,.24,.36,.48,.60,.72,.84].map((d,i) => <div key={i} className="wave-bar" style={{animationDelay:`${d}s`}}></div>)}
+          <div className="call-waveform">
+            {[0,.12,.24,.36,.48,.6,.72].map((d,i)=><div key={i} className="wave-bar" style={{animationDelay:`${d}s`}}></div>)}
           </div>
-          <div className="call-transcript" id="callTranscript"></div>
-          <div className="call-controls">
-            <button className="btn-call active" onClick={() => endCall()} style={{background:'var(--danger-solid)',color:'#fff',justifyContent:'center',padding:'12px',flex:1}}>
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                <path d="M14 11.5v-1.38a1.5 1.5 0 0 0-1.035-1.429l-1.5-.5a1.5 1.5 0 0 0-1.59.418l-.35.4C8.11 9.05 7.09 9.05 5.975 8.535l-.1-.05C4.76 7.97 3.97 7.19 3.49 6.475l.41-.36a1.5 1.5 0 0 0 .418-1.59l-.5-1.5A1.5 1.5 0 0 0 2.38 2H1a1 1 0 0 0 0 2l.1-.001C1.38 9.3 6.7 14 13.5 14a1.5 1.5 0 0 0 1.5-1.5v-.001" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
-                <path d="M12 4l-4 4M8 4l4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-              </svg>
-              End Call
-            </button>
-          </div>
+          <div className="call-transcript-wrap" id="callTranscript"></div>
+          <button className="btn-end-call" onClick={()=>activeEndCall()}>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M14 11.5v-1.38a1.5 1.5 0 0 0-1.035-1.429l-1.5-.5a1.5 1.5 0 0 0-1.59.418l-.35.4C8.11 9.05 7.09 9.05 5.975 8.535l-.1-.05C4.76 7.97 3.97 7.19 3.49 6.475l.41-.36a1.5 1.5 0 0 0 .418-1.59l-.5-1.5A1.5 1.5 0 0 0 2.38 2H1" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
+              <path d="M12 4l-4 4M8 4l4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+            End Call
+          </button>
         </div>
       </div>
     </>
