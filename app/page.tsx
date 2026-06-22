@@ -69,6 +69,7 @@ let callModalTimerInt: ReturnType<typeof setInterval>|null=null
 // CC state
 let ccLoads: any[]=[],ccHasCallMade=false,ccLkRoom: any=null,ccCallState='idle'
 const ccTranscripts=new Map<string,HTMLElement>(),ccDialerTxMap=new Map<string,HTMLElement>()
+const ltDialerTxMap=new Map<string,HTMLElement>()
 let ccAutoRunning=false,ccDialerInt: ReturnType<typeof setInterval>|null=null,ccDialerSecs=0
 let ccDoneSet=new Set<number>(),ccCountdownInt: ReturnType<typeof setInterval>|null=null,ccDemoIdx=-1
 const _ccFeedRefs=new Set<string>()
@@ -179,6 +180,7 @@ function updateTranscriptEl(segId: string,text: string,isAgent: boolean,isFinal:
   const t=e.querySelector('.tx-text');if(t)t.textContent=text
   if(isFinal){e.classList.add('tx-done');activeTranscripts.delete(segId)}
   updateModalTranscript(segId,text,isAgent,isFinal)
+  updateLTDialerTranscript(segId,text,isAgent,isFinal)
 }
 function updateModalTranscript(segId: string,text: string,isAgent: boolean,isFinal: boolean){
   const wrap=el('callTranscript');if(!wrap)return
@@ -191,6 +193,18 @@ function updateModalTranscript(segId: string,text: string,isAgent: boolean,isFin
   }
   const t=e.querySelector('.modal-tx-text');if(t)t.textContent=text
   if(isFinal){e.classList.add('modal-tx-done');modalTranscripts.delete(segId);wrap.scrollTop=0}
+}
+function updateLTDialerTranscript(segId: string,text: string,isAgent: boolean,isFinal: boolean){
+  const wrap=el('ltDialerTranscript');if(!wrap)return
+  const cls=isAgent?'dialer-t-aria':'dialer-t-human',label=isAgent?'Aria':'Driver'
+  let e=ltDialerTxMap.get(segId)
+  if(!e){
+    e=document.createElement('div');e.className='dialer-t-line '+cls
+    e.innerHTML=`<span class="dialer-t-label">${label}:</span><span class="dialer-t-text"></span>`
+    wrap.appendChild(e);ltDialerTxMap.set(segId,e)
+  }
+  const dt=e.querySelector('.dialer-t-text');if(dt)dt.textContent=text
+  wrap.scrollTop=wrap.scrollHeight;if(isFinal)ltDialerTxMap.delete(segId)
 }
 function ccUpdateTranscript(segId: string,text: string,isAgent: boolean,isFinal: boolean){
   if(!text||!text.trim())return
@@ -270,14 +284,28 @@ function subscribeRealtime(){
 
 // ── LT call modal ─────────────────────────────────────────────
 function showCallModal(name: string,sub: string){
+  if(callModalTimerInt)clearInterval(callModalTimerInt)
+  if(activeTab==='lt'){
+    const ldc=el('ltDialerCard'),ln=el('ltDialerName'),ls=el('ltDialerSub'),lt=el('ltDialerTimer'),ltr=el('ltDialerTranscript')
+    if(ln)ln.textContent=name;if(ls)ls.textContent=sub
+    if(lt)lt.textContent='0:00';if(ltr)ltr.innerHTML='';ltDialerTxMap.clear()
+    if(ldc)ldc.classList.add('visible')
+    let secs=0
+    callModalTimerInt=setInterval(()=>{secs++;const m=Math.floor(secs/60),s=secs%60;if(lt)lt.textContent=m+':'+String(s).padStart(2,'0')},1000)
+    return
+  }
   const cn=el('callName'),cs=el('callSub'),ct=el('callTimer'),ctr=el('callTranscript'),co=el('callOverlay')
   if(cn)cn.textContent=name;if(cs)cs.textContent=sub
   if(ct)ct.textContent='0:00';if(ctr)ctr.innerHTML=''
   if(co)co.classList.add('visible')
-  let secs=0;if(callModalTimerInt)clearInterval(callModalTimerInt)
+  let secs=0
   callModalTimerInt=setInterval(()=>{secs++;const m=Math.floor(secs/60),s=secs%60;if(ct)ct.textContent=m+':'+String(s).padStart(2,'0')},1000)
 }
-function hideCallModal(){if(callModalTimerInt)clearInterval(callModalTimerInt);const co=el('callOverlay');if(co)co.classList.remove('visible')}
+function hideCallModal(){
+  if(callModalTimerInt)clearInterval(callModalTimerInt)
+  const co=el('callOverlay');if(co)co.classList.remove('visible')
+  const ldc=el('ltDialerCard');if(ldc)ldc.classList.remove('visible')
+}
 
 async function startCall(){
   callState='connecting';setTopbarCallState('connecting');showError('');dbg('Starting LT call…')
@@ -314,7 +342,7 @@ async function startCall(){
 async function endCall(){
   if(lkRoom){await lkRoom.disconnect();lkRoom=null}
   document.querySelectorAll('audio[data-lk-participant]').forEach((e:any)=>e.remove())
-  activeTranscripts.forEach(e=>e.classList.add('tx-done'));activeTranscripts.clear();modalTranscripts.clear()
+  activeTranscripts.forEach(e=>e.classList.add('tx-done'));activeTranscripts.clear();modalTranscripts.clear();ltDialerTxMap.clear()
   callState='idle';setTopbarCallState('idle');hideCallModal()
   if(hasNewLoad){const r=el('reset-btn');if(r)r.style.display='flex'}
 }
@@ -333,17 +361,25 @@ function renderCCLoads(){
   let html=''
   CC_DEMO_CARRIERS.forEach((c,i)=>{
     const done=ccDoneSet.has(i),active=ccAutoRunning&&ccDemoIdx===i&&!done
-    const callSt=done?'completed':active?'in_progress':'not_called'
-    const st=done?'confirmed':'pending_check'
-    const isBreakdown=c.alertType==='driver_initiated_vehicle_breakdown'
-    const rowCls=done?' row-highlight':(!active&&isBreakdown?' cc-alert-row':'')
     const dbRow=ccLoads.find(l=>l.ref===c.load)
+    const dbDone=dbRow?.call_status==='completed'
+    const callSt=(done||dbDone)?'completed':active?'in_progress':'not_called'
+    const st=(done||dbDone)?(dbRow?.status||'confirmed'):'pending_check'
+    const isBreakdown=c.alertType==='driver_initiated_vehicle_breakdown'
+    const rowCls=(done||dbDone)?' row-highlight':(!active&&isBreakdown?' cc-alert-row':'')
     const phone=dbRow?.driver_phone||''
-    const summary=done&&dbRow?.call_summary?dbRow.call_summary:''
+    const summary=dbRow?.call_summary||''
+    const newEta=dbRow?.last_eta||''
     const alertCol=isBreakdown
       ?`<span class="chip chip-danger"><span class="chip-dot"></span>Vehicle Breakdown · ${c.gpsIdleMins} min</span>`
       :`<span class="chip chip-warning"><span class="chip-dot"></span>GPS Idle · ${c.gpsIdleMins} min</span>`
-    const summaryCol=summary?`<div class="cell-summary">"${summary}"</div>`:statusChip(st)
+    let summaryCol
+    if(summary||newEta){
+      const etaHtml=newEta?`<div class="cell-eta"><span class="cell-eta-orig">${c.pickup}</span><span class="cell-eta-sep">→</span><span class="cell-eta-new">${newEta}</span></div>`:''
+      summaryCol=`<div>${etaHtml}${summary?`<div class="cell-summary">"${summary}"</div>`:''}</div>`
+    } else {
+      summaryCol=statusChip(st)
+    }
     html+=`<div class="table-row cc-cols${rowCls}"><div><div class="cell-primary">${c.name}</div><div class="cell-ref">${c.load}</div>${phone?`<div class="cell-phone">${phone}</div>`:''}</div><div class="cell-muted" style="font-size:var(--text-xs)">${c.route}</div><div>${alertCol}</div><div>${callStatusChip(callSt)}</div><div>${summaryCol}</div></div>`
   })
   otherLoads.forEach(l=>{
@@ -381,6 +417,7 @@ function subscribeCCRealtime(){
       ccHasCallMade=ccLoads.some(l=>l.call_status==='completed')
       const k1=el('cc-k1');if(k1)k1.textContent=String(ccLoads.filter(l=>l.call_status==='completed').length)
       renderCCLoads()
+      if(p.eventType==='UPDATE'&&p.new.call_status==='completed'&&ccAutoRunning&&CC_DEMO_CARRIERS[ccDemoIdx]?.load===p.new.ref)ccStartCountdownToNext()
     }).subscribe()
   db.channel('cc-feed')
     .on('postgres_changes',{event:'INSERT',schema:'public',table:'carrier_check_feed'},(p: any)=>{renderFeedCard(p.new,'feed-cc',true);incFeed('cc')})
@@ -436,6 +473,9 @@ async function ccStartCallForCarrier(carrier: typeof CC_DEMO_CARRIERS[0]){
     })
     thisRoom.on(LK.RoomEvent.TrackUnsubscribed,(track: any)=>track.detach().forEach((e: any)=>e.remove()))
     thisRoom.on(LK.RoomEvent.ActiveSpeakersChanged,(spk: any[])=>{if(activeTab==='cc')updateAudioBars(spk.some(p=>p!==thisRoom.localParticipant))})
+    thisRoom.on(LK.RoomEvent.ParticipantDisconnected,(_p: any)=>{
+      if(ccLkRoom===thisRoom)thisRoom.disconnect()
+    })
     await thisRoom.connect(LK_WS_URL,token);dbg('[CC] Connected · '+carrier.name)
     await thisRoom.startAudio();await thisRoom.localParticipant.setMicrophoneEnabled(true);dbg('[CC] Audio unlocked')
     if(typeof thisRoom.registerTextStreamHandler==='function'){
@@ -459,8 +499,9 @@ async function ccStartCallForCarrier(carrier: typeof CC_DEMO_CARRIERS[0]){
   }
 }
 function ccStartCountdownToNext(){
+  if(ccDoneSet.has(ccDemoIdx))return
   ccDoneSet.add(ccDemoIdx);renderCCLoads()
-  const nextCarrier=CC_DEMO_CARRIERS[ccDemoIdx+1];let secs=5
+  const nextCarrier=CC_DEMO_CARRIERS[ccDemoIdx+1];let secs=8
   const dn=el('dialerName'),dm=el('dialerMeta'),dti=el('dialerTimer'),dtr=el('dialerTranscript'),ldc=el('liveDialerCard')
   if(dn)dn.textContent='✓ '+CC_DEMO_CARRIERS[ccDemoIdx].name+' — Complete'
   if(dm)dm.textContent='Calling '+nextCarrier.name+' in '+secs+'…'
@@ -491,8 +532,12 @@ function stopCCSequence(){
   const ldc=el('liveDialerCard');if(ldc)ldc.classList.remove('visible');renderCCLoads();syncCCBtn()
 }
 async function resetCCDemo(){
+  stopCCSequence()
   await Promise.all([
-    db.from('carrier_check_loads').update({status:'pending_check',call_status:'not_called',eta_confirmed:null}).eq('is_demo_row',true),
+    db.from('carrier_check_loads').update({
+      status:'pending_check',call_status:'not_called',eta_confirmed:null,
+      last_eta:null,call_summary:null,last_location:null,driver_phone:null,notes:null
+    }).eq('is_demo_row',true),
     db.from('carrier_check_calls').delete().eq('is_demo_row',true),
     db.from('carrier_check_feed').delete().eq('is_demo_row',true)
   ])
@@ -589,8 +634,15 @@ async function resetARDemo(){
   arHasCallMade=false;const r=el('reset-btn');if(r)r.style.display='none';await loadARData()
 }
 async function resetDemo(){
-  await Promise.all([db.from('demo_loads').delete().eq('is_demo_row',true),db.from('demo_feed').delete().eq('is_demo_row',true)])
-  hasNewLoad=false;const r=el('reset-btn');if(r)r.style.display='none';await loadData()
+  await Promise.all([
+    db.from('demo_loads').update({status:'new',created_by:'Dispatcher'}).eq('created_by','aria'),
+    db.from('demo_loads').delete().eq('is_demo_row',true),
+    db.from('demo_feed').delete().eq('is_demo_row',true)
+  ])
+  hasNewLoad=false;const r=el('reset-btn');if(r)r.style.display='none'
+  const flt=el('feed-lt');if(flt)flt.innerHTML='';feedCounts.lt=0
+  if(activeTab==='lt'){const fc=el('feedCount');if(fc)fc.textContent='0 events'}
+  await loadData()
 }
 
 // ── Tab switching ─────────────────────────────────────────────
@@ -714,10 +766,31 @@ export default function Page() {
                 <div className="metric-value" id="k3">9</div><div className="metric-delta delta-flat">of 12 calls resulted in a booking</div>
               </div>
             </div>
+            <div className="live-dialer-card" id="ltDialerCard">
+              <div className="dialer-top">
+                <div className="dialer-avatar"><span>A</span><div className="dialer-avatar-ring"></div></div>
+                <div className="dialer-info">
+                  <div className="dialer-badge"><span className="dialer-badge-dot"></span>Aria is answering</div>
+                  <div className="dialer-name" id="ltDialerName">—</div>
+                  <div className="dialer-meta" id="ltDialerSub">Inbound · Load Tender</div>
+                </div>
+                <div className="dialer-waveform">
+                  {[0,.15,.3,.45,.6].map((d,i)=><div key={i} className="dialer-wave-bar" style={{animationDelay:`${d}s`}}></div>)}
+                </div>
+                <div className="dialer-timer" id="ltDialerTimer">0:00</div>
+              </div>
+              <div className="dialer-transcript" id="ltDialerTranscript"></div>
+              <div className="dialer-end-row">
+                <button className="btn-end-call" onClick={()=>endCall()}>End Call</button>
+              </div>
+            </div>
             <div>
               <div className="section-hdr">
                 <div className="section-title">Active Loads — Saturn Freight Systems</div>
-                <span className="section-badge" id="lt-count">—</span>
+                <div style={{display:'flex',alignItems:'center',gap:'var(--space-2)'}}>
+                  <span className="section-badge" id="lt-count">—</span>
+                  <button className="btn-reset-inline" onClick={()=>resetDemo()}>↺ Reset</button>
+                </div>
               </div>
               <div className="table-card">
                 <div className="table-head lt-cols"><span>Shipper / Ref</span><span>Route</span><span>Service</span><span>Status</span><span>Created By</span></div>
@@ -732,12 +805,16 @@ export default function Page() {
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" style={{flexShrink:0}}><path d="M2 8h3l2-5 3 10 2-5h2"/></svg>
               <span><strong>Outbound auto-dialer.</strong> Aria calls each carrier in sequence, logs status &amp; ETA, then moves to the next — no dispatcher needed.</span>
             </div>
-            <div style={{display:'flex',alignItems:'center',gap:'var(--space-3)'}}>
+            <div style={{display:'flex',alignItems:'center',gap:'var(--space-3)',flexWrap:'wrap'}}>
               <button className="btn-init-uc" id="cc-init-btn" onClick={()=>ccInitializeUseCase()}>
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                   <circle cx="8" cy="8" r="6"/><path d="M6 5.5l5 2.5-5 2.5V5.5z" fill="currentColor" stroke="none"/>
                 </svg>
                 Initialize Use Case
+              </button>
+              <button className="btn-reset-inline" onClick={()=>resetCCDemo()}>
+                <svg width="11" height="11" viewBox="0 0 14 14" fill="none"><path d="M2 7A5 5 0 1 0 7 2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/><path d="M7 2 5 4.5 7.5 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                Reset ETA / Summary
               </button>
               <span style={{fontSize:'var(--text-xs)',color:'var(--text-muted)'}}>Auto-dials Marcus → Sandra → James (3 carriers)</span>
             </div>
@@ -780,7 +857,7 @@ export default function Page() {
                 <span className="section-badge" id="cc-count">—</span>
               </div>
               <div className="table-card">
-                <div className="table-head cc-cols"><span>Carrier / Ref</span><span>Route</span><span>Alert</span><span>Call Status</span><span>Summary</span></div>
+                <div className="table-head cc-cols"><span>Carrier / Ref</span><span>Route</span><span>Alert</span><span>Call Status</span><span>ETA / Summary</span></div>
                 <div id="cc-table-body"><div className="feed-empty">Loading carrier data…</div></div>
               </div>
             </div>

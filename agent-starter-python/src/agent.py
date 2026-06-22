@@ -6,6 +6,7 @@ import textwrap
 
 import httpx
 from dotenv import load_dotenv
+from livekit import api
 from livekit.agents import (
     Agent,
     AgentServer,
@@ -18,10 +19,12 @@ from livekit.agents import (
     RunContext,
     cli,
     function_tool,
+    get_job_context,
     inference,
     room_io,
 )
 from livekit.plugins import ai_coustics, silero
+from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 logger = logging.getLogger("agent")
 load_dotenv(".env.local")
@@ -200,17 +203,41 @@ class CarrierCheckAgent(Agent):
 
                 # Output rules
                 You are on a live phone call. Drivers may be in difficult situations — be clear and concise.
-                - Plain spoken English only. No markdown, lists, or formatting.
+                - SSML break tags and plain text only. No markdown, lists, bullet points, or symbols.
                 - One question at a time. Maximum two sentences per turn.
                 - Spell out reference numbers digit by digit.
                 - Say times naturally (e.g. "two-thirty P M Central").
 
-                # Voice naturalness
-                Sound like a real human dispatcher doing a concerned check-in, not a robot.
-                - Vary acknowledgments: "Got it.", "Okay.", "I see.", "Right.", "Understood."
-                - Natural pauses: "Alright, <break time="200ms"/> let me note that down."
-                - If serious: "I completely understand, <break time="200ms"/> let's get you sorted."
-                - Never start two consecutive replies the same way.
+                # Pauses and filler words
+                Use filler words with SSML break tags so your speech sounds natural, not scripted.
+                After standalone "um", insert <break time="300ms"/> and follow with "so" or "let me."
+
+                Examples:
+                - Bad:  "I'll note that down."
+                - Good: "Okay, um <break time="300ms"/> so let me get that noted."
+                - Bad:  "What is your current location?"
+                - Good: "And where are you right now — um <break time="200ms"/> like the nearest town or highway?"
+                - Bad:  "I understand, there is a delay."
+                - Good: "Right, <break time="150ms"/> I hear you — so we're looking at a delay then."
+
+                # Self-corrections
+                When a better phrasing comes to mind mid-sentence, drop the first and restart naturally. Never apologize for it.
+
+                Examples:
+                - Bad:  "What is your estimated time of arrival?"
+                - Good: "And when do you think you'll — actually, <break time="200ms"/> what's your ETA looking like right now?"
+                - Bad:  "Are there any issues with the load?"
+                - Good: "Is everything okay with the — well, <break time="150ms"/> any issues I should flag for the team?"
+
+                # Phrase variation
+                Never open two consecutive turns with the same word. Rotate naturally:
+                "Got it!", "Okay.", "I see.", "Right, right.", "Understood.", "Alright.",
+                "And that's helpful.", "Good to know.", "Copy that.", "Noted."
+
+                # Non-verbal sounds
+                Use sparingly — at most once per call:
+                - If the driver shares something serious (breakdown, injury), a warm "Oh gosh, okay." before responding.
+                - If the driver says they're busy or in traffic, a quick "Of course, of course." before asking to be brief.
 
                 # Call flow
                 1. Open with ONLY: "Hi, is this {self.driver_name}?" — stop and wait for their reply.
@@ -233,20 +260,11 @@ class CarrierCheckAgent(Agent):
     async def on_enter(self) -> None:
         await self.session.generate_reply()
 
-    async def _say_goodbye_and_close(self, context: RunContext) -> None:
-        """Say goodbye via direct TTS, wait for full playout, then close the session."""
-        try:
-            farewell = context.session.say(
-                f"Perfect — I've got everything noted. "
-                f"You take care out there {self.driver_name}, "
-                f"and give us a call if anything changes. Goodbye!",
-                allow_interruptions=False,
-            )
-            await farewell.wait_for_playout()
-            await asyncio.sleep(0.5)
-            await context.session.aclose()
-        except Exception as e:
-            logger.warning("Goodbye/close error: %s", e)
+    async def _hangup(self) -> None:
+        job_ctx = get_job_context()
+        await job_ctx.api.room.delete_room(
+            api.DeleteRoomRequest(room=job_ctx.room.name)
+        )
 
     @function_tool
     async def get_active_loads(self, context: RunContext) -> str:
@@ -299,10 +317,17 @@ class CarrierCheckAgent(Agent):
         if notes:
             data["notes"] = notes
         result = await _supa_patch("carrier_check_loads", {"ref": ref}, data)
-        if result:
-            asyncio.create_task(self._say_goodbye_and_close(context))
-            return "Status updated successfully. Goodbye is playing now — do not speak again."
-        return f"I couldn't find load {ref}. Could you read back the reference number?"
+        if not result:
+            return f"I couldn't find load {ref}. Could you read back the reference number?"
+        farewell = context.session.say(
+            f"Perfect — I've got everything noted. "
+            f"You take care out there {self.driver_name}, "
+            f"and give us a call if anything changes. Goodbye!",
+            allow_interruptions=False,
+        )
+        await farewell.wait_for_playout()
+        await asyncio.sleep(0.5)
+        await self._hangup()
 
 
 # ══════════════════════════════════════════════════════════════
@@ -481,8 +506,9 @@ async def my_agent(ctx: JobContext):
         stt=inference.STT(model="deepgram/nova-3", language="multi"),
         tts=inference.TTS(
             model="cartesia/sonic-3",
-            voice="630ed21c-2c5c-41cf-9d82-10a7fd668370",
+            voice="9626c31c-bec5-4cca-baa8-f8ba9e84c8bc",  # Jacqueline - confident young American female
         ),
+        turn_detection=MultilingualModel(),
         vad=ctx.proc.userdata["vad"],
         preemptive_generation=True,
     )
@@ -515,8 +541,8 @@ async def my_agent(ctx: JobContext):
             ),
         )
     )
-    await background_audio.start(room=ctx.room, agent_session=session)
     await ctx.connect()
+    await background_audio.start(room=ctx.room, agent_session=session)
     await session_task
 
 
