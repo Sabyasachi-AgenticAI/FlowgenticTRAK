@@ -472,9 +472,9 @@ class ARCollectionsAgent(Agent):
         if not result:
             return f"I couldn't find invoice {invoice_no} in our system."
         farewell = context.session.say(
-            f"Perfect — I've got that noted. "
-            f"We'll expect payment by {promise_date}. "
-            f"Thanks so much {self.contact_name}, and have a great rest of your day. Goodbye!",
+            f"Perfect — that's noted, and we appreciate you working with us on this. "
+            f'<break time="300ms"/> Take care, {self.contact_name}. '
+            f'<break time="400ms"/> Goodbye!',
             allow_interruptions=False,
         )
         await farewell.wait_for_playout()
@@ -507,8 +507,9 @@ class ARCollectionsAgent(Agent):
         if not result:
             return f"I couldn't find invoice {invoice_no} in our system."
         farewell = context.session.say(
-            f"Understood — I'll have one of our specialists follow up with you directly. "
-            f"Thanks for your time {self.contact_name}, and have a good day. Goodbye!",
+            f"Of course — I'll flag this for our collections team and someone will be in touch. "
+            f'<break time="300ms"/> Thanks for your time, {self.contact_name}. '
+            f'<break time="400ms"/> Goodbye!',
             allow_interruptions=False,
         )
         await farewell.wait_for_playout()
