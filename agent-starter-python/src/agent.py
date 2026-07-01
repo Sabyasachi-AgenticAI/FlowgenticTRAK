@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import textwrap
+from datetime import date, timedelta
 
 import httpx
 from dotenv import load_dotenv
@@ -345,6 +346,9 @@ class ARCollectionsAgent(Agent):
         due_date = meta.get("due_date", "recently")
         days_overdue = int(meta.get("days_overdue", 0))
         amount_str = f"${amount_due:,.0f}" if amount_due else "the outstanding amount"
+        today = date.today()
+        today_str = today.strftime("%B %d, %Y")
+        tomorrow_str = (today + timedelta(days=1)).strftime("%B %d, %Y")
 
         super().__init__(
             instructions=textwrap.dedent(f"""\
@@ -357,6 +361,15 @@ class ARCollectionsAgent(Agent):
                 Amount due: {amount_str}
                 Due date: {due_date}
                 Days overdue: {days_overdue}
+                Today's date: {today_str}
+
+                # Resolving relative dates
+                When the contact gives a relative date, resolve it to the actual calendar date before calling any tool.
+                - "tomorrow" → {tomorrow_str}
+                - "next week" → the week starting {(today + timedelta(days=7)).strftime("%B %d, %Y")}
+                - "end of month" → {today.strftime("%B")} {(date(today.year, today.month % 12 + 1, 1) - timedelta(days=1)).day}, {today.year}
+                - "Friday" / "Monday" etc. → calculate the nearest upcoming weekday
+                Never ask for clarification on a date the contact has already stated clearly.
 
                 # Output rules
                 You are on a live phone call. Apply these rules at all times:
