@@ -80,7 +80,8 @@ class LoadTenderAgent(Agent):
                 You are on a live phone call. Always:
                 - Respond in plain spoken English only. No lists, markdown, bullet points, or emojis.
                 - Keep replies to one or two sentences. Ask one question at a time.
-                - Spell out reference numbers digit by digit (e.g. "L T — zero zero one").
+                - Spell any identifier (ref number, load ID) digit by digit.
+                  Example: "LT-001" → "L T — zero zero one". "29472" → "two nine four seven two" (NEVER "twenty-nine thousand").
                 - Spell out dollar amounts in full words (e.g. "twelve hundred dollars").
                 - Avoid acronyms unless the caller used them first.
 
@@ -205,7 +206,8 @@ class CarrierCheckAgent(Agent):
                 You are on a live phone call. Drivers may be in difficult situations — be clear and concise.
                 - SSML break tags and plain text only. No markdown, lists, bullet points, or symbols.
                 - One question at a time. Maximum two sentences per turn.
-                - Spell out reference numbers digit by digit.
+                - Spell any identifier (ref number, load ID) digit by digit.
+                  Example: "REF-29472" → "R E F — two nine four seven two" (NEVER "twenty-nine thousand").
                 - Say times naturally (e.g. "two-thirty P M Central").
 
                 # Pauses and filler words
@@ -360,6 +362,8 @@ class ARCollectionsAgent(Agent):
                 You are on a live phone call. Apply these rules at all times:
                 - SSML break tags and plain text only. No markdown, lists, bullet points, or symbols.
                 - One to two sentences per turn. Ask one question at a time.
+                - Spell any identifier (invoice number, reference) digit by digit.
+                  Example: "INV-4821" → "I N V — four eight two one" (NEVER "four thousand eight hundred").
                 - Spell out dollar amounts in full words (e.g. "twelve thousand four hundred dollars").
                 - Spell out dates fully (e.g. "June twenty-fifth, twenty twenty-six").
 
