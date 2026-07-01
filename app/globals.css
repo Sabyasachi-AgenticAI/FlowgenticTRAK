@@ -495,8 +495,9 @@ body {
   margin-bottom: var(--space-2);
 }
 .dialer-badge-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--amber-500); animation: pulseDot 1.2s ease-in-out infinite; }
-.dialer-name  { font-size: var(--text-md); font-weight: var(--weight-semibold); color: #fff; margin-bottom: 3px; }
-.dialer-meta  { font-size: var(--text-xs); color: var(--slate-400); }
+.dialer-name    { font-size: var(--text-md); font-weight: var(--weight-semibold); color: #fff; margin-bottom: 1px; }
+.dialer-contact { font-size: var(--text-xs); color: var(--amber-400); font-weight: var(--weight-medium); margin-bottom: 3px; }
+.dialer-meta    { font-size: var(--text-xs); color: var(--slate-400); }
 .dialer-timer { font-family: var(--font-mono); font-size: var(--text-xl); font-weight: var(--weight-bold); color: var(--amber-400); letter-spacing: 0.05em; flex-shrink: 0; }
 .dialer-waveform { display: flex; align-items: center; gap: 2px; height: 24px; flex-shrink: 0; }
 .dialer-wave-bar { width: 3px; border-radius: 2px; background: var(--amber-500); animation: wave 0.9s ease-in-out infinite; }

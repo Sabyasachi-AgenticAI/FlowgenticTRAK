@@ -620,9 +620,11 @@ function syncARBtn(){
 }
 function updateARDemoDialer(){
   const a=arDemoAccounts[arDemoIdx];if(!a)return
-  const dn=el('arDialerName'),dm=el('arDialerMeta'),dc=el('arDialerCurrent'),dt=el('arDialerTotal'),dnx=el('arDialerNext'),dti=el('arDialerTimer'),dtr=el('arDialerTranscript'),ldc=el('arDialerCard')
-  if(dn)dn.textContent=a.customer;if(dm)dm.textContent=a.invoice_no+' · $'+Number(a.amount_due).toLocaleString()+' · '+a.days_overdue+'d overdue'
-  if(dc)dc.textContent=String(arDemoIdx+1);if(dt)dt.textContent=String(arDemoAccounts.length)
+  const dn=el('arDialerName'),dc=el('arDialerContact'),dm=el('arDialerMeta'),dcur=el('arDialerCurrent'),dt=el('arDialerTotal'),dnx=el('arDialerNext'),dti=el('arDialerTimer'),dtr=el('arDialerTranscript'),ldc=el('arDialerCard')
+  if(dn)dn.textContent=a.customer
+  if(dc)dc.textContent=a.contact_name?a.contact_name+' · AP':''
+  if(dm)dm.textContent=a.invoice_no+' · $'+Number(a.amount_due).toLocaleString()+' · '+a.days_overdue+'d overdue'
+  if(dcur)dcur.textContent=String(arDemoIdx+1);if(dt)dt.textContent=String(arDemoAccounts.length)
   const next=arDemoAccounts[arDemoIdx+1];if(dnx)dnx.textContent=next?next.customer:'Sequence Complete'
   if(dti)dti.textContent='0:00';if(dtr)dtr.innerHTML='';arDialerTxMap.clear()
   if(ldc)ldc.classList.add('visible')
@@ -994,6 +996,7 @@ export default function Page() {
                 <div className="dialer-info">
                   <div className="dialer-badge"><span className="dialer-badge-dot"></span>Aria is calling</div>
                   <div className="dialer-name" id="arDialerName">—</div>
+                  <div className="dialer-contact" id="arDialerContact"></div>
                   <div className="dialer-meta" id="arDialerMeta">—</div>
                 </div>
                 <div className="dialer-waveform">
