@@ -77,6 +77,9 @@ const _ccFeedRefs=new Set<string>()
 // AR state
 let arAccounts: any[]=[],arHasCallMade=false,arLkRoom: any=null,arCallState='idle'
 const arTranscripts=new Map<string,HTMLElement>()
+let arAutoRunning=false,arDemoAccounts: any[]=[],arDemoIdx=-1,arDoneSet=new Set<number>()
+let arCountdownInt: ReturnType<typeof setInterval>|null=null,arDialerInt: ReturnType<typeof setInterval>|null=null,arDialerSecs=0
+const arDialerTxMap=new Map<string,HTMLElement>(),_arFeedRefs=new Set<string>()
 
 const CC_DEMO_CARRIERS=[
   {name:'Marcus Webb',initial:'M',load:'REF-29472',route:'MIA → LAX',pickup:'Jun 21, 07:00 CT',gpsIdleMins:97,alertType:'gps_idle'},
@@ -240,7 +243,17 @@ function arUpdateTranscript(segId: string,text: string,isAgent: boolean,isFinal:
   }
   const t=e.querySelector('.tx-text');if(t)t.textContent=text
   if(isFinal){e.classList.add('tx-done');arTranscripts.delete(segId)}
-  updateModalTranscript(segId,text,isAgent,isFinal)
+  const dw=el('arDialerTranscript')
+  if(dw){
+    let dlEl=arDialerTxMap.get(segId)
+    if(!dlEl){
+      dlEl=document.createElement('div');dlEl.className='dialer-t-line '+(isAgent?'dialer-t-aria':'dialer-t-human')
+      dlEl.innerHTML=`<span class="dialer-t-label">${isAgent?'Aria':'Contact'}:</span><span class="dialer-t-text"></span>`
+      dw.appendChild(dlEl);arDialerTxMap.set(segId,dlEl)
+    }
+    const dt=dlEl.querySelector('.dialer-t-text');if(dt)dt.textContent=text
+    dw.scrollTop=dw.scrollHeight;if(isFinal)arDialerTxMap.delete(segId)
+  }
 }
 
 // ── Load Tender data ──────────────────────────────────────────
@@ -554,7 +567,13 @@ function renderARAccounts(){
   const ac=el('ar-count');if(ac)ac.textContent=arAccounts.length+' accounts'
   const body=el('ar-table-body');if(!body)return
   if(!arAccounts.length){body.innerHTML='<div class="feed-empty">No accounts found.</div>';return}
-  body.innerHTML=arAccounts.map((a: any)=>`<div class="table-row ar-cols${a.status==='payment_promised'||a.status==='paid'?' row-highlight':''}"><div><div class="cell-primary">${a.customer}</div><div class="cell-ref">${a.invoice_no}</div></div><div class="cell-amount">$${Number(a.amount_due).toLocaleString()}</div><div style="color:${a.days_overdue>60?'var(--danger-fg)':a.days_overdue>30?'var(--warning-fg)':'var(--text-muted)'}">${a.days_overdue}d</div><div>${callStatusChip(a.call_status)}</div><div>${statusChip(a.status)}</div></div>`).join('')
+  body.innerHTML=arAccounts.map((a: any)=>{
+    const isDone=a.call_status==='completed'
+    const isActive=arAutoRunning&&arDemoIdx>=0&&arDemoAccounts[arDemoIdx]?.invoice_no===a.invoice_no
+    const callSt=isDone?'completed':isActive?'in_progress':a.call_status==='in_progress'?'in_progress':'not_called'
+    const summaryCol=a.call_summary?`<div class="cell-summary">"${a.call_summary}"</div>`:statusChip(a.status)
+    return `<div class="table-row ar-cols${isDone?' row-highlight':''}"><div><div class="cell-primary">${a.customer}</div><div class="cell-ref">${a.invoice_no}</div>${a.contact_name?`<div class="cell-phone">${a.contact_name}</div>`:''}</div><div class="cell-amount">$${Number(a.amount_due).toLocaleString()}</div><div style="color:${a.days_overdue>60?'var(--danger-fg)':a.days_overdue>30?'var(--warning-fg)':'var(--text-muted)'}">${a.days_overdue}d</div><div>${callStatusChip(callSt)}</div><div>${summaryCol}</div></div>`
+  }).join('')
 }
 async function loadARData(){
   const [ar,fr]=await Promise.all([
@@ -572,8 +591,16 @@ async function loadARData(){
 function subscribeARRealtime(){
   db.channel('ar-accounts')
     .on('postgres_changes',{event:'*',schema:'public',table:'ar_accounts'},(p: any)=>{
-      if(p.eventType==='UPDATE'){const i=arAccounts.findIndex((a: any)=>a.id===p.new.id);if(i>-1)arAccounts[i]=p.new}
-      else if(p.eventType==='INSERT')arAccounts.push(p.new)
+      if(p.eventType==='UPDATE'){
+        const i=arAccounts.findIndex((a: any)=>a.id===p.new.id);if(i>-1)arAccounts[i]=p.new
+        if(p.new.call_status==='completed'&&p.new.call_summary&&!_arFeedRefs.has(p.new.invoice_no)){
+          _arFeedRefs.add(p.new.invoice_no)
+          const now=new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})
+          const tool=p.new.status==='escalated'?'escalate_account':'log_promise_to_pay'
+          renderFeedCard({title:p.new.customer+' — '+p.new.invoice_no,who:'aria',time_str:now,quote:p.new.call_summary,badge_type:'auto',tool},'feed-ar',true);incFeed('ar')
+          if(arAutoRunning&&arDemoAccounts[arDemoIdx]?.invoice_no===p.new.invoice_no)arStartCountdownToNext()
+        }
+      } else if(p.eventType==='INSERT')arAccounts.push(p.new)
       else if(p.eventType==='DELETE')arAccounts=arAccounts.filter((a: any)=>a.id!==p.old.id)
       arHasCallMade=arAccounts.some((a: any)=>a.call_status==='completed')
       const k1=el('ar-k1');if(k1)k1.textContent=String(arAccounts.filter((a: any)=>a.call_status==='completed').length)
@@ -586,51 +613,114 @@ function subscribeARRealtime(){
 }
 function syncARBtn(){
   const btn=el('call-btn'),lbl=el('call-label');if(!btn||!lbl)return
-  btn.className='btn-call'+(arCallState==='active'?' call-active':arCallState==='connecting'?' call-connecting':'')
+  const active=arCallState==='active'||arAutoRunning
+  btn.className='btn-call'+(active?' call-active':arCallState==='connecting'?' call-connecting':'')
   ;(btn as HTMLButtonElement).disabled=arCallState==='connecting'
-  lbl.textContent=arCallState==='active'?'End Call':arCallState==='connecting'?'Connecting…':TAB_BTN_LABEL.ar
+  lbl.textContent=arCallState==='connecting'?'Connecting…':active?'End Sequence':TAB_BTN_LABEL.ar
 }
-async function arStartCall(){
-  arCallState='connecting';syncARBtn();showError('');dbg('Starting AR call…')
+function updateARDemoDialer(){
+  const a=arDemoAccounts[arDemoIdx];if(!a)return
+  const dn=el('arDialerName'),dm=el('arDialerMeta'),dc=el('arDialerCurrent'),dt=el('arDialerTotal'),dnx=el('arDialerNext'),dti=el('arDialerTimer'),dtr=el('arDialerTranscript'),ldc=el('arDialerCard')
+  if(dn)dn.textContent=a.customer;if(dm)dm.textContent=a.invoice_no+' · $'+Number(a.amount_due).toLocaleString()+' · '+a.days_overdue+'d overdue'
+  if(dc)dc.textContent=String(arDemoIdx+1);if(dt)dt.textContent=String(arDemoAccounts.length)
+  const next=arDemoAccounts[arDemoIdx+1];if(dnx)dnx.textContent=next?next.customer:'Sequence Complete'
+  if(dti)dti.textContent='0:00';if(dtr)dtr.innerHTML='';arDialerTxMap.clear()
+  if(ldc)ldc.classList.add('visible')
+}
+async function arInitializeUseCase(){
+  if(arAutoRunning){stopARSequence();return}
+  const {data}=await db.from('ar_accounts').select('*').eq('status','pending_call').order('days_overdue',{ascending:false})
+  arDemoAccounts=data||[]
+  if(!arDemoAccounts.length){dbg('[AR] No pending accounts to call');return}
+  arDemoIdx=0;arDoneSet=new Set();_arFeedRefs.clear()
+  const far=el('feed-ar');if(far)far.innerHTML='';feedCounts.ar=0
+  if(activeTab==='ar'){const fc=el('feedCount');if(fc)fc.textContent='0 events'}
+  updateARDemoDialer();arStartCallForAccount(arDemoAccounts[0])
+}
+async function arStartCallForAccount(account: any){
+  arCallState='connecting';arAutoRunning=true;syncARBtn();showError('');dbg('[AR] → '+account.customer)
+  const initBtn=el('ar-init-btn')
+  if(initBtn){initBtn.innerHTML='<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 3h2v10H5zM9 3h2v10H9z"/></svg> End Sequence';initBtn.classList.add('running')}
   try {
     const LK=await getLK()
-    const room=newRoomName('ar');const token=await makeParticipantToken(room)
-    arLkRoom=new LK.Room({adaptiveStream:true,dynacast:true})
-    arLkRoom.on(LK.RoomEvent.Disconnected,()=>{arCallState='idle';syncARBtn();hideCallModal()})
-    arLkRoom.on(LK.RoomEvent.TrackSubscribed,(track: any,_pub: any,p: any)=>{
-      if(track.kind===LK.Track.Kind.Audio){const ae=track.attach();ae.dataset.lkParticipant='ar-'+p.sid;document.body.appendChild(ae)}
+    const roomName=newRoomName('ar');const token=await makeParticipantToken(roomName)
+    if(arLkRoom){const old=arLkRoom;arLkRoom=null;await old.disconnect()}
+    arTranscripts.forEach(e=>e.classList.add('tx-done'));arTranscripts.clear();arDialerTxMap.clear()
+    const thisRoom=new LK.Room({adaptiveStream:true,dynacast:true})
+    arLkRoom=thisRoom
+    thisRoom.on(LK.RoomEvent.Disconnected,()=>{
+      if(arLkRoom!==thisRoom)return
+      arLkRoom=null;arCallState='idle';if(arDialerInt)clearInterval(arDialerInt)
+      document.querySelectorAll('audio[data-lk-participant^="ar-"]').forEach((e:any)=>e.remove())
+      if(arAutoRunning&&arDemoIdx<arDemoAccounts.length-1)arStartCountdownToNext()
+      else if(arAutoRunning)arSequenceComplete()
     })
-    arLkRoom.on(LK.RoomEvent.TrackUnsubscribed,(track: any)=>track.detach().forEach((e: any)=>e.remove()))
-    arLkRoom.on(LK.RoomEvent.ActiveSpeakersChanged,(spk: any[])=>{if(activeTab==='ar')updateAudioBars(spk.some(p=>p!==arLkRoom.localParticipant))})
-    await arLkRoom.connect(LK_WS_URL,token);dbg('[AR] Connected')
-    if(typeof arLkRoom.registerTextStreamHandler==='function'){
-      arLkRoom.registerTextStreamHandler('lk.transcription',async(reader: any,pInfo: any)=>{
+    thisRoom.on(LK.RoomEvent.TrackSubscribed,(track: any,_pub: any,p: any)=>{
+      if(track.kind===LK.Track.Kind.Audio){const ae=track.attach();ae.dataset.lkParticipant='ar-'+p.sid;document.body.appendChild(ae);dbg('[AR] Audio attached')}
+    })
+    thisRoom.on(LK.RoomEvent.TrackUnsubscribed,(track: any)=>track.detach().forEach((e: any)=>e.remove()))
+    thisRoom.on(LK.RoomEvent.ActiveSpeakersChanged,(spk: any[])=>{if(activeTab==='ar')updateAudioBars(spk.some(p=>p!==thisRoom.localParticipant))})
+    thisRoom.on(LK.RoomEvent.ParticipantDisconnected,()=>{if(arLkRoom===thisRoom)thisRoom.disconnect()})
+    await thisRoom.connect(LK_WS_URL,token);dbg('[AR] Connected · '+account.customer)
+    await thisRoom.startAudio();await thisRoom.localParticipant.setMicrophoneEnabled(true);dbg('[AR] Audio unlocked')
+    if(typeof thisRoom.registerTextStreamHandler==='function'){
+      thisRoom.registerTextStreamHandler('lk.transcription',async(reader: any,pInfo: any)=>{
         const attrs=(reader.info?.attributes)||{};const segId=attrs['lk.segment_id'],isFinal=attrs['lk.transcription_final']!=='false'
-        const isAgent=pInfo.identity!==arLkRoom.localParticipant.identity;if(!segId&&!isFinal)return
+        const isAgent=pInfo.identity!==thisRoom.localParticipant.identity;if(!segId&&!isFinal)return
         try{const text=await reader.readAll();arUpdateTranscript(segId||('ar-'+Date.now()),text,isAgent,isFinal)}catch(e){}
       })
-      arLkRoom.registerTextStreamHandler('lk.chat',async(reader: any,pInfo: any)=>{
-        const isAgent=pInfo.identity!==arLkRoom.localParticipant.identity
+      thisRoom.registerTextStreamHandler('lk.chat',async(reader: any,pInfo: any)=>{
+        const isAgent=pInfo.identity!==thisRoom.localParticipant.identity
         try{const text=await reader.readAll();arUpdateTranscript('chat-'+Date.now(),text,isAgent,true)}catch(e){}
       })
     }
-    await dispatchAgent(room,{use_case:'ar_collections'})
-    await arLkRoom.startAudio();await arLkRoom.localParticipant.setMicrophoneEnabled(true)
-    arCallState='active';syncARBtn();showCallModal('AR Collections — Aria','Outbound · AR Collections');dbg('[AR] Live')
-  } catch(err:any){dbg('[AR] ERROR: '+(err.message||err));arCallState='idle';syncARBtn();showError(err.message||'AR call failed')}
+    await dispatchAgent(roomName,{use_case:'ar_collections'})
+    arCallState='active';syncARBtn();if(arDialerInt)clearInterval(arDialerInt);arDialerSecs=0
+    arDialerInt=setInterval(()=>{arDialerSecs++;const m=Math.floor(arDialerSecs/60),s=arDialerSecs%60;const dti=el('arDialerTimer');if(dti)dti.textContent=m+':'+String(s).padStart(2,'0')},1000)
+    renderARAccounts();dbg('[AR] Live — '+account.customer)
+  } catch(err:any){
+    dbg('[AR] ERROR: '+(err.message||err));arCallState='idle';arAutoRunning=false;syncARBtn();showError(err.message||'AR call failed')
+    const b=el('ar-init-btn');if(b){b.innerHTML='<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M6 5.5l5 2.5-5 2.5V5.5z" fill="currentColor" stroke="none"/></svg> Call Aria · AR Collections';b.classList.remove('running');(b as HTMLButtonElement).disabled=false}
+  }
 }
-async function arEndCall(){
-  if(arLkRoom){await arLkRoom.disconnect();arLkRoom=null}
+function arStartCountdownToNext(){
+  if(arDoneSet.has(arDemoIdx))return
+  arDoneSet.add(arDemoIdx);renderARAccounts()
+  const nextAccount=arDemoAccounts[arDemoIdx+1];let secs=8
+  const dn=el('arDialerName'),dm=el('arDialerMeta'),dti=el('arDialerTimer'),dtr=el('arDialerTranscript')
+  if(dn)dn.textContent='✓ '+arDemoAccounts[arDemoIdx].customer+' — Complete'
+  if(dm)dm.textContent='Calling '+(nextAccount?nextAccount.customer:'...')+' in '+secs+'…'
+  if(dti)dti.textContent=String(secs);if(dtr)dtr.innerHTML='';arDialerTxMap.clear()
+  if(arCountdownInt)clearInterval(arCountdownInt)
+  arCountdownInt=setInterval(()=>{
+    secs--;if(secs>0){if(dm)dm.textContent='Calling '+(nextAccount?nextAccount.customer:'...')+' in '+secs+'…';if(dti)dti.textContent=String(secs)}
+    else{if(arCountdownInt)clearInterval(arCountdownInt);arDemoIdx++;arDialerSecs=0;updateARDemoDialer();renderARAccounts();arStartCallForAccount(arDemoAccounts[arDemoIdx])}
+  },1000)
+}
+function arSequenceComplete(){
+  arDoneSet.add(arDemoIdx);if(arDialerInt)clearInterval(arDialerInt);if(arCountdownInt)clearInterval(arCountdownInt)
+  arAutoRunning=false
+  const dn=el('arDialerName'),dm=el('arDialerMeta'),dti=el('arDialerTimer'),dnx=el('arDialerNext'),ldc=el('arDialerCard'),rst=el('reset-btn')
+  if(dn)dn.textContent='✓ Sequence Complete';if(dm)dm.textContent=arDemoAccounts.length+' accounts called — demo done'
+  if(dti)dti.textContent='—';if(dnx)dnx.textContent='Done'
+  renderARAccounts();syncARBtn()
+  const b=el('ar-init-btn');if(b){b.innerHTML='<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M6 5.5l5 2.5-5 2.5V5.5z" fill="currentColor" stroke="none"/></svg> Call Aria · AR Collections';b.classList.remove('running');(b as HTMLButtonElement).disabled=false}
+  if(rst)rst.style.display='flex';setTimeout(()=>{if(ldc)ldc.classList.remove('visible')},4000)
+}
+function stopARSequence(){
+  if(arDialerInt)clearInterval(arDialerInt);if(arCountdownInt)clearInterval(arCountdownInt);arCountdownInt=null
+  arDemoIdx=-1;arDoneSet=new Set();arAutoRunning=false;arCallState='idle'
+  if(arLkRoom){const r=arLkRoom;arLkRoom=null;r.disconnect()}
   document.querySelectorAll('audio[data-lk-participant^="ar-"]').forEach((e:any)=>e.remove())
-  arTranscripts.forEach(e=>e.classList.add('tx-done'));arTranscripts.clear()
-  arCallState='idle';syncARBtn();hideCallModal()
-  if(arHasCallMade){const r=el('reset-btn');if(r)r.style.display='flex'}
+  arTranscripts.forEach(e=>e.classList.add('tx-done'));arTranscripts.clear();arDialerTxMap.clear()
+  const b=el('ar-init-btn');if(b){b.innerHTML='<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M6 5.5l5 2.5-5 2.5V5.5z" fill="currentColor" stroke="none"/></svg> Call Aria · AR Collections';b.classList.remove('running');(b as HTMLButtonElement).disabled=false}
+  const ldc=el('arDialerCard');if(ldc)ldc.classList.remove('visible');renderARAccounts();syncARBtn()
 }
 async function resetARDemo(){
-  await Promise.all([
-    db.from('ar_accounts').update({status:'pending_call',call_status:'not_called',payment_date:null}).eq('is_demo_row',true),
-    db.from('ar_feed').delete().eq('is_demo_row',true)
-  ])
+  stopARSequence()
+  await db.from('ar_accounts').update({
+    status:'pending_call',call_status:'not_called',payment_date:null,call_summary:null,notes:null
+  }).eq('is_demo_row',true)
   arHasCallMade=false;const r=el('reset-btn');if(r)r.style.display='none';await loadARData()
 }
 async function resetDemo(){
@@ -666,9 +756,9 @@ function switchTab(tab: string){
 function activeToggleCall(){
   if(activeTab==='lt')toggleCall()
   else if(activeTab==='cc'){if(ccAutoRunning)stopCCSequence();else ccInitializeUseCase()}
-  else arStartCall()
+  else{if(arAutoRunning)stopARSequence();else arInitializeUseCase()}
 }
-function activeEndCall(){if(activeTab==='lt')endCall();else if(activeTab==='ar')arEndCall();else hideCallModal()}
+function activeEndCall(){if(activeTab==='lt')endCall();else if(activeTab==='ar')stopARSequence();else hideCallModal()}
 function activeResetDemo(){if(activeTab==='lt')resetDemo();else if(activeTab==='cc')resetCCDemo();else resetARDemo()}
 
 // ── React component ───────────────────────────────────────────
@@ -865,6 +955,23 @@ export default function Page() {
 
           {/* AR COLLECTIONS */}
           <div id="panel-ar" style={{display:'none',flexDirection:'column',gap:'var(--space-5)'}}>
+            <div className="brand-banner">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" style={{flexShrink:0}}><path d="M8 2v12M5 5h4.5a1.5 1.5 0 0 1 0 3H6a1.5 1.5 0 0 0 0 3H11"/></svg>
+              <span><strong>Outbound auto-dialer.</strong> Aria calls each overdue account in priority order, secures payment commitments, and escalates disputes — no AR specialist needed.</span>
+            </div>
+            <div style={{display:'flex',alignItems:'center',gap:'var(--space-3)',flexWrap:'wrap'}}>
+              <button className="btn-init-uc" id="ar-init-btn" onClick={()=>arInitializeUseCase()}>
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <circle cx="8" cy="8" r="6"/><path d="M6 5.5l5 2.5-5 2.5V5.5z" fill="currentColor" stroke="none"/>
+                </svg>
+                Call Aria · AR Collections
+              </button>
+              <button className="btn-reset-inline" onClick={()=>resetARDemo()}>
+                <svg width="11" height="11" viewBox="0 0 14 14" fill="none"><path d="M2 7A5 5 0 1 0 7 2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/><path d="M7 2 5 4.5 7.5 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                Reset Demo
+              </button>
+              <span style={{fontSize:'var(--text-xs)',color:'var(--text-muted)'}}>Auto-dials overdue accounts by priority</span>
+            </div>
             <div className="metrics-row">
               <div className="metric-card">
                 <div className="metric-eyebrow">Calls Made</div><div className="metric-desc">Collection calls placed this session</div>
@@ -881,13 +988,32 @@ export default function Page() {
                 <div className="metric-delta delta-flat">Cash in</div>
               </div>
             </div>
+            <div className="live-dialer-card" id="arDialerCard">
+              <div className="dialer-top">
+                <div className="dialer-avatar"><span>A</span><div className="dialer-avatar-ring"></div></div>
+                <div className="dialer-info">
+                  <div className="dialer-badge"><span className="dialer-badge-dot"></span>Aria is calling</div>
+                  <div className="dialer-name" id="arDialerName">—</div>
+                  <div className="dialer-meta" id="arDialerMeta">—</div>
+                </div>
+                <div className="dialer-waveform">
+                  {[0,.15,.3,.45,.6].map((d,i)=><div key={i} className="dialer-wave-bar" style={{animationDelay:`${d}s`}}></div>)}
+                </div>
+                <div className="dialer-timer" id="arDialerTimer">0:00</div>
+              </div>
+              <div className="dialer-transcript" id="arDialerTranscript"></div>
+              <div className="dialer-progress-row">
+                <span className="dialer-progress-text">Account <strong id="arDialerCurrent">1</strong> of <strong id="arDialerTotal">—</strong></span>
+                <span className="dialer-next-text">Next: <strong id="arDialerNext">—</strong></span>
+              </div>
+            </div>
             <div>
               <div className="section-hdr">
                 <div className="section-title">AR Accounts — Saturn Freight Systems</div>
                 <span className="section-badge" id="ar-count">—</span>
               </div>
               <div className="table-card">
-                <div className="table-head ar-cols"><span>Customer / Invoice</span><span>Amount Due</span><span>Days O/D</span><span>Call Status</span><span>Outcome</span></div>
+                <div className="table-head ar-cols"><span>Customer / Invoice</span><span>Amount Due</span><span>Days O/D</span><span>Call Status</span><span>Outcome / Summary</span></div>
                 <div id="ar-table-body"><div className="feed-empty">Loading AR data…</div></div>
               </div>
             </div>

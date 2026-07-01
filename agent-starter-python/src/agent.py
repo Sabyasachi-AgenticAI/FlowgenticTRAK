@@ -334,69 +334,95 @@ class CarrierCheckAgent(Agent):
 # PERSONA 3 — AR Collections (outbound)
 # ══════════════════════════════════════════════════════════════
 class ARCollectionsAgent(Agent):
-    async def on_enter(self) -> None:
-        await self.session.generate_reply()
+    def __init__(self, account_meta: dict | None = None) -> None:
+        meta = account_meta or {}
+        self.contact_name = meta.get("contact_name") or "the billing contact"
+        self.customer = meta.get("customer", "your company")
+        invoice_no = meta.get("invoice_no", "your invoice")
+        amount_due = meta.get("amount_due", 0)
+        due_date = meta.get("due_date", "recently")
+        days_overdue = int(meta.get("days_overdue", 0))
+        amount_str = f"${amount_due:,.0f}" if amount_due else "the outstanding amount"
 
-    def __init__(self) -> None:
         super().__init__(
-            instructions=textwrap.dedent("""\
+            instructions=textwrap.dedent(f"""\
                 You are Aria, an AI accounts receivable specialist for Saturn Freight Systems.
-                You make outbound calls to customers about overdue invoices.
+                You are making an outbound collection call to {self.customer} about an overdue invoice.
+
+                # Account details — use these directly, do not look them up
+                Contact: {self.contact_name} (Accounts Payable)
+                Invoice: {invoice_no}
+                Amount due: {amount_str}
+                Due date: {due_date}
+                Days overdue: {days_overdue}
 
                 # Output rules
                 You are on a live phone call. Apply these rules at all times:
-                - Plain spoken English only. No markdown, lists, or formatting.
+                - SSML break tags and plain text only. No markdown, lists, bullet points, or symbols.
                 - One to two sentences per turn. Ask one question at a time.
-                - Spell out dollar amounts in full words (e.g. "twelve thousand five hundred dollars").
+                - Spell out dollar amounts in full words (e.g. "twelve thousand four hundred dollars").
                 - Spell out dates fully (e.g. "June twenty-fifth, twenty twenty-six").
 
-                # Voice naturalness
-                Sound like a professional, human collections specialist — firm but empathetic.
-                - Vary openers every turn: "Got it.", "I see.", "Understood.", "Right —", "Okay."
-                - Natural pause before key figures: "The outstanding balance is — <break time="400ms"/> eight thousand two hundred dollars."
-                - Empathetic but direct: "I completely understand, <break time="200ms"/> and I appreciate you letting me know."
-                - Occasional self-correction for emphasis: "The due date was the fifteenth — the invoice due date, that is."
-                - Never start two consecutive replies with the same word or phrase.
-                - Close warmly: "Thanks so much — and have a good rest of your day."
+                # Pauses and filler words
+                Use filler words with SSML break tags so your speech sounds natural, not scripted.
+                After standalone "um", insert <break time="300ms"/> and follow with "so" or "let me."
+
+                Examples:
+                - Bad:  "I'll note that down."
+                - Good: "Okay, um <break time="300ms"/> so let me get that noted."
+                - Bad:  "When can we expect payment?"
+                - Good: "And when are you thinking — um <break time="200ms"/> like, what date works for your team?"
+                - Bad:  "I understand there may be a delay."
+                - Good: "Right, <break time="150ms"/> I hear you — so there's a timing issue then."
+
+                # Self-corrections
+                When a better phrasing comes to mind mid-sentence, drop the first and restart naturally. Never apologize for it.
+
+                Examples:
+                - Bad:  "The invoice was due on {due_date}."
+                - Good: "So this was due — the due date was {due_date}, that is."
+                - Bad:  "Are you aware of this balance?"
+                - Good: "Did you — have you seen this invoice come through on your end?"
+
+                # Phrase variation
+                Never open two consecutive turns with the same word. Rotate naturally:
+                "Got it.", "Okay.", "I see.", "Right, right.", "Understood.", "Alright.",
+                "And that's helpful.", "Good to know.", "Copy that.", "Noted."
+
+                # Non-verbal sounds
+                Use sparingly — at most once per call:
+                - If they mention cash flow issues, a warm "Oh, I hear you." before responding.
+                - If they're cooperative and quick, a quick "Perfect, perfect." before confirming.
 
                 # Objective
-                Secure a payment commitment or escalate disputes to a human agent.
+                Secure a payment commitment date, or escalate disputes to a human specialist.
+                Be direct about the amount owed — don't soften the ask. Professional and empathetic, never aggressive.
 
                 # Call flow
-                1. Open: "Hello, may I speak with [contact name]?
-                   This is Aria from Saturn Freight Systems, accounts receivable."
-                2. Call get_overdue_accounts to identify the invoice to discuss.
-                3. State the purpose: "I'm calling about invoice [number] for [amount],
-                   which was due on [date]. Are you aware of this outstanding balance?"
-                4. If yes: "When can we expect payment?"
-                5. If committing: call log_promise_to_pay.
-                6. If disputing or unable to pay: call escalate_account.
-                7. Confirm next steps and close warmly.
+                1. Open with ONLY: "Hi, may I speak with {self.contact_name} in Accounts Payable?" — stop and wait.
+                   Do NOT say anything else until they respond.
+                2. Once confirmed: "Hi, this is Aria calling from Saturn Freight Systems.
+                   I'm reaching out about invoice {invoice_no} for {amount_str} — it's {days_overdue} days past due."
+                3. Ask: "Are you aware of this balance, and do you know when we might expect payment?"
+                4. If committing to a date: confirm clearly, then call log_promise_to_pay.
+                5. If disputing or unable to commit: call escalate_account.
+                6. Do NOT say goodbye — it plays automatically after the tool succeeds. Stay silent.
 
                 # Guardrails
-                - Professional and empathetic — never aggressive or accusatory.
-                - Be direct about the amount owed — don't soften the ask.
                 - One question at a time.
+                - If no answer after a reasonable wait, call escalate_account anyway.
+                - Do not speak after calling log_promise_to_pay or escalate_account.
             """),
         )
 
-    @function_tool
-    async def get_overdue_accounts(self, context: RunContext) -> str:
-        """Get the list of overdue accounts with the highest priority first.
-        Use this at the start to know which invoice to discuss with the customer.
-        """
-        rows = await _supa_get("ar_accounts")
-        if not rows:
-            return "No overdue accounts found."
-        rows = sorted(rows, key=lambda r: r.get("days_overdue", 0), reverse=True)
-        lines = [
-            f"Invoice {r.get('invoice_no', '?')}: "
-            f"{r.get('customer', '?')} — "
-            f"${r.get('amount_due', 0):,.0f} — "
-            f"{r.get('days_overdue', 0)} days overdue"
-            for r in rows[:3]
-        ]
-        return "Priority accounts: " + "; ".join(lines)
+    async def on_enter(self) -> None:
+        await self.session.generate_reply()
+
+    async def _hangup(self) -> None:
+        job_ctx = get_job_context()
+        await job_ctx.api.room.delete_room(
+            api.DeleteRoomRequest(room=job_ctx.room.name)
+        )
 
     @function_tool
     async def log_promise_to_pay(
@@ -404,30 +430,39 @@ class ARCollectionsAgent(Agent):
         context: RunContext,
         invoice_no: str,
         promise_date: str,
+        call_summary: str,
         notes: str = "",
     ) -> str:
-        """Record a customer's verbal commitment to pay an invoice.
+        """Record a customer's verbal commitment to pay. Call once commitment is confirmed.
+        The call ends automatically after this — do NOT speak again.
 
         Args:
             invoice_no: The invoice number
-            promise_date: The date they committed to pay (e.g. 'June 25, 2026')
-            notes: Any context from the call
+            promise_date: The date they committed to pay (e.g. 'July 10, 2026')
+            call_summary: One-sentence recap for the AR dashboard (REQUIRED)
+            notes: Any additional context from the call
         """
         logger.info("Promise to pay — invoice %s by %s", invoice_no, promise_date)
         data: dict = {
             "status": "payment_promised",
             "call_status": "completed",
             "payment_date": promise_date,
+            "call_summary": call_summary,
         }
         if notes:
             data["notes"] = notes
         result = await _supa_patch("ar_accounts", {"invoice_no": invoice_no}, data)
-        if result:
-            return (
-                f"Recorded. Invoice {invoice_no} — customer committed to pay by {promise_date}. "
-                f"We'll follow up if payment isn't received."
-            )
-        return f"I couldn't find invoice {invoice_no} in our system."
+        if not result:
+            return f"I couldn't find invoice {invoice_no} in our system."
+        farewell = context.session.say(
+            f"Perfect — I've got that noted. "
+            f"We'll expect payment by {promise_date}. "
+            f"Thanks so much {self.contact_name}, and have a great rest of your day. Goodbye!",
+            allow_interruptions=False,
+        )
+        await farewell.wait_for_playout()
+        await asyncio.sleep(0.5)
+        await self._hangup()
 
     @function_tool
     async def escalate_account(
@@ -435,26 +470,50 @@ class ARCollectionsAgent(Agent):
         context: RunContext,
         invoice_no: str,
         reason: str,
+        call_summary: str,
     ) -> str:
         """Escalate an account to a human collections specialist.
-        Use when the customer disputes the charges or is unable to commit to payment.
+        Use when the customer disputes charges or cannot commit to a payment date.
+        The call ends automatically after this — do NOT speak again.
 
         Args:
             invoice_no: The invoice number
-            reason: Reason for escalation (e.g. 'customer disputes freight charges on load LT-003')
+            reason: Reason for escalation (e.g. 'customer disputes freight charges')
+            call_summary: One-sentence recap for the AR dashboard (REQUIRED)
         """
         logger.info("Escalating invoice %s: %s", invoice_no, reason)
         result = await _supa_patch(
             "ar_accounts",
             {"invoice_no": invoice_no},
-            {"status": "escalated", "call_status": "completed", "notes": reason},
+            {"status": "escalated", "call_status": "completed", "notes": reason, "call_summary": call_summary},
         )
-        if result:
-            return (
-                f"Invoice {invoice_no} has been escalated. "
-                f"A collections specialist will reach out within one business day."
-            )
-        return f"I couldn't find invoice {invoice_no} in our system."
+        if not result:
+            return f"I couldn't find invoice {invoice_no} in our system."
+        farewell = context.session.say(
+            f"Understood — I'll have one of our specialists follow up with you directly. "
+            f"Thanks for your time {self.contact_name}, and have a good day. Goodbye!",
+            allow_interruptions=False,
+        )
+        await farewell.wait_for_playout()
+        await asyncio.sleep(0.5)
+        await self._hangup()
+
+    @function_tool
+    async def get_overdue_accounts(self, context: RunContext) -> str:
+        """Emergency fallback: fetch overdue account details if not available at call start.
+        Only use if account details were not provided.
+        """
+        rows = await _supa_get("ar_accounts", {"call_status": "in_progress"})
+        if not rows:
+            rows = await _supa_get("ar_accounts", {"status": "pending_call"})
+        if not rows:
+            return "No pending accounts found."
+        r = sorted(rows, key=lambda x: x.get("days_overdue", 0), reverse=True)[0]
+        return (
+            f"Invoice {r.get('invoice_no')}: {r.get('customer')} — "
+            f"${r.get('amount_due', 0):,.0f} — {r.get('days_overdue', 0)} days overdue — "
+            f"due {r.get('due_date', '?')} — contact: {r.get('contact_name') or 'Accounts Payable'}"
+        )
 
 
 # ── Persona factory ───────────────────────────────────────────
@@ -515,6 +574,15 @@ async def my_agent(ctx: JobContext):
 
     if use_case == "carrier_check":
         agent = CarrierCheckAgent(driver_meta=driver_meta)
+    elif use_case == "ar_collections":
+        pending = await _supa_get("ar_accounts", {"status": "pending_call"})
+        pending = sorted(pending, key=lambda r: r.get("days_overdue", 0), reverse=True)
+        if pending:
+            account = pending[0]
+            await _supa_patch("ar_accounts", {"id": account["id"]}, {"call_status": "in_progress"})
+            agent = ARCollectionsAgent(account_meta=account)
+        else:
+            agent = ARCollectionsAgent()
     else:
         agent = _PERSONA_MAP[use_case]()
     logger.info("Starting session with %s", type(agent).__name__)
