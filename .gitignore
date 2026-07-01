@@ -32,3 +32,5 @@ Thumbs.db
 
 # Design handoff zip archives only
 *.zip
+
+.vercel
