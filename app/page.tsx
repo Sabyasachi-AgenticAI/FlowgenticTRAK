@@ -824,10 +824,12 @@ function renderRNNegotiations(){
     if(n.driver_name)bookingBits.push('Driver: '+n.driver_name+(n.driver_phone?' ('+n.driver_phone+')':''))
     if(n.mc_number)bookingBits.push('MC '+n.mc_number+(n.insurance_verified?' · Insurance ✓':''))
     const booking=bookingBits.length?`<div class="cell-muted" style="font-size:var(--text-xs);margin-top:2px">${bookingBits.join(' · ')}</div>`:''
+    const savings=n.status==='completed'&&n.final_rate&&n.target_rate?Math.round(n.target_rate-n.final_rate):0
+    const starBadge=savings>0?`<div class="rn-star-badge">⭐ +$${savings.toLocaleString()} under target</div>`:''
     return `<div class="table-row rn-neg-cols${n.status==='completed'?' row-highlight':''}">
       <div><div class="cell-primary">${n.carrier_name||'—'}</div></div>
       <div class="cell-amount">${n.carrier_offer?'$'+Number(n.carrier_offer).toLocaleString():'—'}</div>
-      <div class="cell-amount">${n.final_rate?'$'+Number(n.final_rate).toLocaleString():'—'}</div>
+      <div class="cell-amount">${n.final_rate?'$'+Number(n.final_rate).toLocaleString():'—'}${starBadge}</div>
       <div>${summary}${booking}</div>
     </div>`
   }).join('')
@@ -860,6 +862,7 @@ function updateRNDialer(){
   if(dc)dc.textContent=String(rnCarrierIdx+1);if(dt)dt.textContent=String(rnCarriers.length)
   const next=rnCarriers[rnCarrierIdx+1];if(dnx)dnx.textContent=next?next.carrier_name:'Sequence Complete'
   if(dti)dti.textContent='0:00';if(dtr)dtr.innerHTML='';if(doff)doff.textContent='';if(dboss){dboss.textContent='';dboss.className='rn-boss-status'}
+  const dtac=el('rnDialerTactic');if(dtac){dtac.style.display='none';dtac.textContent=''}
   rnDialerTxMap.clear();if(dcard)dcard.classList.add('visible')
 }
 function updateRNDialerTx(segId:string,text:string,isAgent:boolean,isFinal:boolean){
@@ -1022,6 +1025,15 @@ function subscribeRNRealtime(){
           else if(p.new.boss_call_status==='completed'){bossEl.textContent=p.new.boss_decision==='approved'?'✓ Approved':'✗ Rejected';bossEl.className='rn-boss-status boss-done'}
         }
         if(p.new.carrier_offer){const doff=el('rnDialerOffer');if(doff)doff.textContent='$'+Number(p.new.carrier_offer).toLocaleString()+' offered'}
+        if(p.new.last_tactic_used){
+          const dtac=el('rnDialerTactic')
+          if(dtac&&dtac.getAttribute('data-tactic')!==p.new.last_tactic_used){
+            dtac.setAttribute('data-tactic',p.new.last_tactic_used)
+            dtac.textContent='🎯 Playbook: '+p.new.last_tactic_used+(p.new.last_tactic_effectiveness?' ('+p.new.last_tactic_effectiveness+'% effective)':'')
+            dtac.style.display='inline-flex'
+            dtac.classList.remove('pulse-once');void (dtac as HTMLElement).offsetWidth;dtac.classList.add('pulse-once')
+          }
+        }
         if((p.new.status==='completed'||p.new.status==='failed')&&p.new.id===rnCurrentNegId&&!_rnFeedRefs.has(p.new.id)){
           _rnFeedRefs.add(p.new.id)
           const now=new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})
@@ -1398,6 +1410,7 @@ export default function Page() {
                   <div className="dialer-name" id="rnDialerName">—</div>
                   <div className="dialer-meta" id="rnDialerMeta"></div>
                   <div id="rnDialerOffer" style={{fontSize:'var(--text-xs)',color:'var(--amber-400)',fontWeight:'var(--weight-medium)',marginTop:'2px'}}></div>
+                  <div id="rnDialerTactic" className="rn-tactic-badge" style={{display:'none'}}></div>
                   <div id="rnBossStatus" className="rn-boss-status"></div>
                 </div>
                 <div style={{textAlign:'right'}}>

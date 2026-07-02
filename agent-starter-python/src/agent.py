@@ -741,6 +741,12 @@ class RateNegotiationAgent(Agent):
         if not rows:
             return "No specific tactic on file — use your own judgment and stay within the rate corridor."
         rows.sort(key=lambda r: r.get("effectiveness") or 0, reverse=True)
+        top = rows[0]
+        await _supa_patch(
+            "rate_negotiations",
+            {"id": self.negotiation_id},
+            {"last_tactic_used": top.get("name"), "last_tactic_effectiveness": top.get("effectiveness")},
+        )
         lines = [f"- {r['name']}: {(r.get('script_line') or '').strip()}" for r in rows[:2]]
         return "Persuasion angles you can adapt in your own words (don't read verbatim):\n" + "\n".join(lines)
 
