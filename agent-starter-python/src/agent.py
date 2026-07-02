@@ -534,16 +534,239 @@ class ARCollectionsAgent(Agent):
         )
 
 
+# ══════════════════════════════════════════════════════════════
+# PERSONA 4 — Rate Negotiation (outbound, Marcus)
+# ══════════════════════════════════════════════════════════════
+class RateNegotiationAgent(Agent):
+    def __init__(self, negotiation_meta: dict | None = None) -> None:
+        meta = negotiation_meta or {}
+        self.negotiation_id = meta.get("negotiation_id")
+        self.origin = meta.get("origin", "origin")
+        self.destination = meta.get("destination", "destination")
+        self.weight_lbs = int(meta.get("weight_lbs") or 0)
+        self.commodity = meta.get("commodity", "general freight")
+        self.carrier_name = meta.get("carrier_name", "the carrier")
+        self.floor_rate = float(meta.get("floor_rate") or 0)
+        self.target_rate = float(meta.get("target_rate") or 0)
+        self.ceiling_rate = float(meta.get("ceiling_rate") or 0)
+        self.boss_called = False
+
+        weight_str = f"{self.weight_lbs:,} lbs" if self.weight_lbs else "full truckload"
+
+        super().__init__(
+            instructions=textwrap.dedent(f"""\
+                You are Marcus, a freight rate negotiation specialist at Saturn Freight Systems.
+                You are making an outbound call to {self.carrier_name} to negotiate a spot rate.
+
+                # Load details
+                Lane: {self.origin} → {self.destination}
+                Weight: {weight_str}
+                Commodity: {self.commodity}
+
+                # Rate corridor — CONFIDENTIAL, never reveal these to the carrier
+                Floor (absolute minimum we pay): ${self.floor_rate:,.0f}
+                Target (your goal):              ${self.target_rate:,.0f}
+                Ceiling (max you can authorise): ${self.ceiling_rate:,.0f}
+
+                # Negotiation strategy
+                - Open by stating the lane and weight only. Never mention floor, target, or ceiling.
+                - First ask: "What's your best rate on this?"
+                - Carrier AT or BELOW target → it's a good deal; still call call_boss_for_approval before committing.
+                - Carrier BETWEEN target and ceiling → push back once with a counter near target, then call call_boss_for_approval with their firm offer.
+                - Carrier ABOVE ceiling → counter firmly at target. If they won't move below ceiling, call reject_negotiation.
+                - Never accept a rate on the spot — procedure requires supervisor sign-off every time.
+                - Be confident and direct. You have done hundreds of these calls.
+
+                # Output rules
+                - Phone call tone: brief, direct, commercial. Two sentences max per turn.
+                - SSML break tags for natural pauses. No markdown or symbols.
+                - Speak dollar amounts in full words: "two thousand nine hundred dollars".
+                - Do NOT say goodbye — it plays automatically after the tool completes.
+
+                # Naturalism
+                After "yeah" or "right": insert <break time="200ms"/> before continuing.
+                Examples:
+                - "Right, <break time="200ms"/> so we're at two thousand nine hundred for this lane."
+                - "Yeah, <break time="150ms"/> let me see what I can do on that."
+
+                # Call flow
+                1. Open: "Hey, this is Marcus from Saturn Freight — you got capacity available right now?"
+                2. State: "{self.origin} to {self.destination}, {weight_str}, {self.commodity} — what's your best rate?"
+                3. Negotiate and counter until carrier gives a firm number.
+                4. Call call_boss_for_approval with that number.
+                5. Supervisor joins — present the deal to them directly.
+                6. After supervisor decision: confirm_rate (approved) or reject_negotiation (rejected).
+
+                # Guardrails
+                - One question per turn.
+                - Never reveal floor / target / ceiling.
+                - Always call boss before committing — no exceptions.
+                - Do not speak after confirm_rate or reject_negotiation.
+            """),
+        )
+
+    async def on_enter(self) -> None:
+        job_ctx = get_job_context()
+
+        @job_ctx.room.on("participant_disconnected")
+        def _on_disconnect(participant) -> None:
+            if participant.identity == "boss-approval":
+                asyncio.create_task(
+                    _supa_patch(
+                        "rate_negotiations",
+                        {"id": self.negotiation_id},
+                        {"boss_call_status": "completed"},
+                    )
+                )
+
+        await self.session.generate_reply()
+
+    async def _hangup(self) -> None:
+        job_ctx = get_job_context()
+        await job_ctx.api.room.delete_room(
+            api.DeleteRoomRequest(room=job_ctx.room.name)
+        )
+
+    @function_tool
+    async def call_boss_for_approval(
+        self,
+        context: RunContext,
+        carrier_rate: float,
+        justification: str,
+    ) -> str:
+        """Call the supervisor for rate approval. Always call this before committing to any rate.
+        The supervisor joins the current call — present the deal to them directly.
+
+        Args:
+            carrier_rate: The carrier's offered rate as a number (e.g. 3050)
+            justification: One sentence on why this rate is acceptable or questionable
+        """
+        if self.boss_called:
+            return "Supervisor already contacted. Act on their decision."
+
+        self.boss_called = True
+        job_ctx = get_job_context()
+        sip_trunk_id = os.getenv("SIP_OUTBOUND_TRUNK_ID", "")
+        boss_phone = os.getenv("BOSS_PHONE", "")
+
+        await _supa_patch(
+            "rate_negotiations",
+            {"id": self.negotiation_id},
+            {"carrier_offer": carrier_rate, "boss_call_status": "calling", "status": "pending_approval"},
+        )
+
+        try:
+            await job_ctx.api.sip.create_sip_participant(
+                api.CreateSIPParticipantRequest(
+                    sip_trunk_id=sip_trunk_id,
+                    sip_call_to=boss_phone,
+                    room_name=job_ctx.room.name,
+                    participant_identity="boss-approval",
+                    participant_name="Supervisor",
+                    play_dialtone=True,
+                )
+            )
+        except Exception as e:
+            logger.error("SIP boss call failed: %s", e)
+            await _supa_patch(
+                "rate_negotiations",
+                {"id": self.negotiation_id},
+                {"boss_call_status": "failed"},
+            )
+            return "Could not reach supervisor. Use your best judgment and proceed."
+
+        await _supa_patch(
+            "rate_negotiations",
+            {"id": self.negotiation_id},
+            {"boss_call_status": "on_call"},
+        )
+
+        return (
+            f"Supervisor is now on the line. Present: {self.carrier_name} is quoting "
+            f"${carrier_rate:,.0f} for {self.origin} to {self.destination}, "
+            f"{self.weight_lbs:,} lbs {self.commodity}. {justification}. "
+            f"Ask: 'Do I have your approval at this rate?'"
+        )
+
+    @function_tool
+    async def confirm_rate(
+        self,
+        context: RunContext,
+        final_rate: float,
+        call_summary: str,
+    ) -> str:
+        """Lock in the negotiated rate after supervisor approval.
+
+        Args:
+            final_rate: The agreed final rate
+            call_summary: One-sentence recap for the dashboard (REQUIRED)
+        """
+        await _supa_patch(
+            "rate_negotiations",
+            {"id": self.negotiation_id},
+            {
+                "final_rate": final_rate,
+                "status": "completed",
+                "call_summary": call_summary,
+                "boss_decision": "approved",
+            },
+        )
+        farewell = context.session.say(
+            f"Perfect — we are locked in at {int(final_rate):,} dollars. "
+            f'<break time="300ms"/> I will get the rate confirmation over to you shortly. '
+            f'<break time="300ms"/> Thanks for working with us. <break time="400ms"/> Goodbye!',
+            allow_interruptions=False,
+        )
+        await farewell.wait_for_playout()
+        await asyncio.sleep(0.5)
+        await self._hangup()
+        return "Rate confirmed."
+
+    @function_tool
+    async def reject_negotiation(
+        self,
+        context: RunContext,
+        reason: str,
+        call_summary: str,
+    ) -> str:
+        """End the negotiation without a deal — rate above ceiling or supervisor rejected.
+
+        Args:
+            reason: Why the negotiation failed
+            call_summary: One-sentence recap for the dashboard (REQUIRED)
+        """
+        await _supa_patch(
+            "rate_negotiations",
+            {"id": self.negotiation_id},
+            {
+                "status": "failed",
+                "call_summary": call_summary,
+                "boss_decision": "rejected",
+                "notes": reason,
+            },
+        )
+        farewell = context.session.say(
+            f"I appreciate your time — we are not able to make the numbers work on this one. "
+            f'<break time="300ms"/> We will keep you in mind for future loads. <break time="400ms"/> Goodbye!',
+            allow_interruptions=False,
+        )
+        await farewell.wait_for_playout()
+        await asyncio.sleep(0.5)
+        await self._hangup()
+        return "Negotiation closed."
+
+
 # ── Persona factory ───────────────────────────────────────────
 _PERSONA_MAP: dict[str, type[Agent]] = {
     "load_tender": LoadTenderAgent,
     "carrier_check": CarrierCheckAgent,
     "ar_collections": ARCollectionsAgent,
+    "rate_negotiation": RateNegotiationAgent,
 }
 
 
 def _resolve_dispatch(room_name: str, metadata_str: str | None) -> tuple[str, dict]:
-    """Determine use case and extract driver metadata from dispatch."""
+    """Determine use case and extract metadata from dispatch."""
     driver_meta: dict = {}
     if metadata_str:
         try:
@@ -554,7 +777,11 @@ def _resolve_dispatch(room_name: str, metadata_str: str | None) -> tuple[str, di
                 return use_case, driver_meta
         except (json.JSONDecodeError, AttributeError):
             pass
-    prefix_map = {"lt": "load_tender", "crew": "load_tender", "cc": "carrier_check", "ar": "ar_collections"}
+    prefix_map = {
+        "lt": "load_tender", "crew": "load_tender",
+        "cc": "carrier_check", "ar": "ar_collections",
+        "rn": "rate_negotiation",
+    }
     prefix = room_name.split("-")[0] if room_name else "lt"
     return prefix_map.get(prefix, "load_tender"), driver_meta
 
@@ -601,6 +828,14 @@ async def my_agent(ctx: JobContext):
             agent = ARCollectionsAgent(account_meta=account)
         else:
             agent = ARCollectionsAgent()
+    elif use_case == "rate_negotiation":
+        if driver_meta.get("negotiation_id"):
+            await _supa_patch(
+                "rate_negotiations",
+                {"id": driver_meta["negotiation_id"]},
+                {"status": "negotiating"},
+            )
+        agent = RateNegotiationAgent(negotiation_meta=driver_meta)
     else:
         agent = _PERSONA_MAP[use_case]()
     logger.info("Starting session with %s", type(agent).__name__)

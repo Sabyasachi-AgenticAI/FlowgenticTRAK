@@ -63,7 +63,7 @@ let loads: any[]=[],hasNewLoad=false,lkRoom: any=null,callState='idle'
 const activeTranscripts=new Map<string,HTMLElement>()
 const modalTranscripts=new Map<string,HTMLElement>()
 let activeTab='cc'
-const feedCounts={lt:0,cc:0,ar:0}
+const feedCounts={lt:0,cc:0,ar:0,rn:0}
 let callModalTimerInt: ReturnType<typeof setInterval>|null=null
 
 // CC state
@@ -80,6 +80,14 @@ const arTranscripts=new Map<string,HTMLElement>()
 let arAutoRunning=false,arDemoAccounts: any[]=[],arDemoIdx=-1,arDoneSet=new Set<number>()
 let arCountdownInt: ReturnType<typeof setInterval>|null=null,arDialerInt: ReturnType<typeof setInterval>|null=null,arDialerSecs=0
 const arDialerTxMap=new Map<string,HTMLElement>(),_arFeedRefs=new Set<string>()
+
+// ── RN (Rate Negotiation) state ───────────────────────────────
+let rnParsedLoad:{origin:string,destination:string,weight:number,commodity:string}|null=null
+let rnLaneRates:any=null,rnCarriers:any[]=[],rnNegotiations:any[]=[]
+let rnAutoRunning=false,rnCarrierIdx=-1,rnCurrentNegId:number|null=null
+let rnLkRoom:any=null,rnCallState='idle',rnDialerSecs=0
+let rnDialerInt:ReturnType<typeof setInterval>|null=null,rnCountdownInt:ReturnType<typeof setInterval>|null=null
+const rnDialerTxMap=new Map<string,HTMLElement>(),_rnDoneSet=new Set<number>(),_rnFeedRefs=new Set<number>()
 
 const CC_DEMO_CARRIERS=[
   {name:'Marcus Webb',initial:'M',load:'REF-29472',route:'MIA → LAX',pickup:'Jun 21, 07:00 CT',gpsIdleMins:97,alertType:'gps_idle'},
@@ -737,31 +745,280 @@ async function resetDemo(){
   await loadData()
 }
 
+// ── Rate Negotiation ──────────────────────────────────────────
+function parseLoadRequirement(text: string){
+  let origin='',destination='',weight=0,commodity='General Freight'
+  const routeA=text.match(/from\s+([A-Za-z][A-Za-z\s,\.]+?)\s+to\s+([A-Za-z][A-Za-z\s,\.]+?)(?:\s*(?:,(?!\s*[A-Z]{2}\b)|[-–·\n])|$)/i)
+  const routeB=text.match(/([A-Z][a-z]+(?:[,\s]+[A-Z]{2})?)\s+to\s+([A-Z][a-z]+(?:[,\s]+[A-Z]{2})?)/i)
+  if(routeA){origin=routeA[1].trim();destination=routeA[2].trim()}
+  else if(routeB){origin=routeB[1].trim();destination=routeB[2].trim()}
+  const wm=text.match(/(\d[\d,]+)\s*(?:lbs?|pounds?)/i)||text.match(/(\d+)k\s*lbs?/i)
+  if(wm){const raw=wm[1].replace(/,/g,'');weight=parseInt(raw)*(wm[0].toLowerCase().includes('k ')?1000:1)}
+  if(/refrig/i.test(text))commodity='Refrigerated'
+  else if(/flatbed/i.test(text))commodity='Flatbed'
+  else if(/hazmat/i.test(text))commodity='Hazmat'
+  return {origin,destination,weight,commodity}
+}
+async function fetchCarriersForLane(origin:string,destination:string){
+  const {data}=await db.from('carrier_rate_history').select('carrier_name,rate,load_date')
+    .eq('origin',origin).eq('destination',destination).order('load_date',{ascending:false})
+  if(!data||!data.length)return[]
+  const map=new Map<string,{rates:number[],dates:string[]}>()
+  data.forEach((r:any)=>{
+    if(!map.has(r.carrier_name))map.set(r.carrier_name,{rates:[],dates:[]})
+    map.get(r.carrier_name)!.rates.push(Number(r.rate));map.get(r.carrier_name)!.dates.push(r.load_date)
+  })
+  return Array.from(map.entries()).map(([name,{rates,dates}])=>({
+    carrier_name:name,avg_rate:Math.round(rates.reduce((a,b)=>a+b,0)/rates.length),
+    last_rate:rates[0],load_count:rates.length,last_date:dates[0]
+  })).sort((a,b)=>a.avg_rate-b.avg_rate)
+}
+function renderRNLaneCorridor(){
+  const lr=rnLaneRates
+  const fe=el('rn-floor'),te=el('rn-target'),ce=el('rn-ceil')
+  if(fe)fe.textContent=lr?'$'+Number(lr.floor_rate).toLocaleString():'—'
+  if(te)te.textContent=lr?'$'+Number(lr.target_rate).toLocaleString():'—'
+  if(ce)ce.textContent=lr?'$'+Number(lr.ceiling_rate).toLocaleString():'—'
+}
+function renderRNCarriers(){
+  const body=el('rn-carrier-body');if(!body)return
+  if(!rnCarriers.length){body.innerHTML='<div class="feed-empty">No carrier history for this lane.</div>';return}
+  body.innerHTML=rnCarriers.map((c:any,i:number)=>{
+    const isDone=_rnDoneSet.has(i),isActive=rnAutoRunning&&rnCarrierIdx===i
+    const st=isActive?'in_progress':isDone?'completed':'not_called'
+    const neg=isDone?rnNegotiations.find((n:any)=>n.carrier_name===c.carrier_name&&(n.status==='completed'||n.status==='failed')):null
+    const outcome=neg?.call_summary?`<div class="cell-summary">"${neg.call_summary}"</div>`:(isDone?callStatusChip(neg?.status==='completed'?'completed':'failed'):'')
+    return `<div class="table-row rn-cols${isDone&&neg?.status==='completed'?' row-highlight':''}">
+      <div><div class="cell-primary">${c.carrier_name}</div></div>
+      <div class="cell-amount">$${c.avg_rate.toLocaleString()}</div>
+      <div class="cell-amount">$${c.last_rate.toLocaleString()}</div>
+      <div class="cell-muted">${c.load_count}</div>
+      <div class="cell-muted" style="font-size:var(--text-xs)">${c.last_date?new Date(c.last_date+'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}):'—'}</div>
+      <div>${callStatusChip(st)}</div>
+      <div>${outcome}</div>
+    </div>`
+  }).join('')
+}
+function renderRNNegotiations(){
+  const body=el('rn-neg-body');if(!body)return
+  if(!rnNegotiations.length){body.innerHTML='';return}
+  body.innerHTML=rnNegotiations.map((n:any)=>{
+    const statusMap:Record<string,string>={
+      completed:'<span class="chip chip-success"><span class="chip-dot"></span>Confirmed</span>',
+      failed:'<span class="chip chip-danger"><span class="chip-dot"></span>No Deal</span>',
+      negotiating:'<span class="chip chip-info"><span class="chip-dot"></span>Live</span>',
+      pending_approval:'<span class="chip chip-warning"><span class="chip-dot"></span>Boss Review</span>',
+    }
+    const chip=statusMap[n.status]||`<span class="chip">${n.status}</span>`
+    const summary=n.call_summary?`<div class="cell-summary">"${n.call_summary}"</div>`:chip
+    return `<div class="table-row rn-neg-cols${n.status==='completed'?' row-highlight':''}">
+      <div><div class="cell-primary">${n.carrier_name||'—'}</div></div>
+      <div class="cell-amount">${n.carrier_offer?'$'+Number(n.carrier_offer).toLocaleString():'—'}</div>
+      <div class="cell-amount">${n.final_rate?'$'+Number(n.final_rate).toLocaleString():'—'}</div>
+      <div>${summary}</div>
+    </div>`
+  }).join('')
+}
+async function loadRNData(){
+  const {data}=await db.from('rate_negotiations').select('*').order('created_at',{ascending:false}).limit(20)
+  rnNegotiations=data||[];renderRNNegotiations()
+}
+async function searchCarriersForLane(){
+  const ta=el('rn-load-input') as HTMLTextAreaElement
+  if(!ta||!ta.value.trim())return
+  const parsed=parseLoadRequirement(ta.value);rnParsedLoad=parsed
+  const pe=el('rn-parsed')
+  if(pe){
+    pe.innerHTML=parsed.origin?`<strong>${parsed.origin}</strong> → <strong>${parsed.destination}</strong>${parsed.weight?' · '+parsed.weight.toLocaleString()+' lbs':''} · ${parsed.commodity}`:'Could not parse — check origin/destination'
+    pe.style.display='flex'
+  }
+  if(!parsed.origin||!parsed.destination)return
+  const {data:lr}=await db.from('lane_rates').select('*').eq('origin',parsed.origin).eq('destination',parsed.destination).limit(1)
+  rnLaneRates=lr?.[0]||null;renderRNLaneCorridor()
+  rnCarriers=await fetchCarriersForLane(parsed.origin,parsed.destination)
+  renderRNCarriers()
+  const btn=el('rn-start-btn');if(btn)(btn as HTMLButtonElement).disabled=rnCarriers.length===0
+}
+function updateRNDialer(){
+  const c=rnCarriers[rnCarrierIdx];if(!c)return
+  const dn=el('rnDialerName'),dm=el('rnDialerMeta'),dc=el('rnDialerCurrent'),dt=el('rnDialerTotal'),dnx=el('rnDialerNext'),dti=el('rnDialerTimer'),dtr=el('rnDialerTranscript'),dcard=el('rnDialerCard'),dboss=el('rnBossStatus'),doff=el('rnDialerOffer')
+  if(dn)dn.textContent=c.carrier_name;if(dm)dm.textContent='avg $'+c.avg_rate.toLocaleString()+' · '+c.load_count+' loads'
+  if(dc)dc.textContent=String(rnCarrierIdx+1);if(dt)dt.textContent=String(rnCarriers.length)
+  const next=rnCarriers[rnCarrierIdx+1];if(dnx)dnx.textContent=next?next.carrier_name:'Sequence Complete'
+  if(dti)dti.textContent='0:00';if(dtr)dtr.innerHTML='';if(doff)doff.textContent='';if(dboss){dboss.textContent='';dboss.className='rn-boss-status'}
+  rnDialerTxMap.clear();if(dcard)dcard.classList.add('visible')
+}
+function updateRNDialerTx(segId:string,text:string,isAgent:boolean,isFinal:boolean){
+  const dw=el('rnDialerTranscript');if(!dw)return
+  let dlEl=rnDialerTxMap.get(segId)
+  if(!dlEl){
+    dlEl=document.createElement('div');dlEl.className='dialer-t-line '+(isAgent?'dialer-t-aria':'dialer-t-human')
+    dlEl.innerHTML=`<span class="dialer-t-label">${isAgent?'Marcus':'Carrier'}:</span><span class="dialer-t-text"></span>`
+    dw.appendChild(dlEl);rnDialerTxMap.set(segId,dlEl)
+  }
+  const dt=dlEl.querySelector('.dialer-t-text');if(dt)dt.textContent=text
+  dw.scrollTop=dw.scrollHeight;if(isFinal)rnDialerTxMap.delete(segId)
+}
+async function rnStartCallForCarrier(carrier:any){
+  if(!rnParsedLoad)return
+  const {data:neg,error}=await db.from('rate_negotiations').insert({
+    origin:rnParsedLoad.origin,destination:rnParsedLoad.destination,
+    weight_lbs:rnParsedLoad.weight||null,commodity:rnParsedLoad.commodity,
+    carrier_name:carrier.carrier_name,floor_rate:rnLaneRates?.floor_rate||null,
+    target_rate:rnLaneRates?.target_rate||null,ceiling_rate:rnLaneRates?.ceiling_rate||null,
+    status:'negotiating',is_demo_row:true,
+  }).select().single()
+  if(error||!neg){dbg('[RN] Insert error: '+(error?.message));return}
+  rnCurrentNegId=neg.id;rnNegotiations.unshift(neg);renderRNNegotiations()
+  try{
+    const LK=await getLK();const roomName=newRoomName('rn');const token=await makeParticipantToken(roomName)
+    if(rnLkRoom){const old=rnLkRoom;rnLkRoom=null;await old.disconnect()}
+    rnDialerTxMap.clear()
+    const thisRoom=new LK.Room({adaptiveStream:true,dynacast:true});rnLkRoom=thisRoom
+    thisRoom.on(LK.RoomEvent.Disconnected,()=>{
+      if(rnLkRoom!==thisRoom)return;rnCallState='idle'
+      if(rnAutoRunning&&!_rnFeedRefs.has(rnCurrentNegId!)){_rnFeedRefs.add(rnCurrentNegId!);rnStartCountdownToNext()}
+    })
+    thisRoom.on(LK.RoomEvent.TrackSubscribed,(track:any,_pub:any,participant:any)=>{
+      if(track.kind===LK.Track.Kind.Audio){const ae=track.attach();ae.dataset.lkParticipant='rn-'+participant.sid;document.body.appendChild(ae)}
+    })
+    thisRoom.on(LK.RoomEvent.TrackUnsubscribed,(track:any)=>track.detach().forEach((e:any)=>e.remove()))
+    await thisRoom.connect(LK_WS_URL,token)
+    await dispatchAgent(roomName,{
+      use_case:'rate_negotiation',negotiation_id:neg.id,carrier_name:carrier.carrier_name,
+      origin:rnParsedLoad.origin,destination:rnParsedLoad.destination,
+      weight_lbs:rnParsedLoad.weight,commodity:rnParsedLoad.commodity,
+      floor_rate:rnLaneRates?.floor_rate,target_rate:rnLaneRates?.target_rate,ceiling_rate:rnLaneRates?.ceiling_rate,
+    })
+    await thisRoom.localParticipant.setMicrophoneEnabled(true)
+    if(typeof thisRoom.registerTextStreamHandler==='function'){
+      thisRoom.registerTextStreamHandler('lk.transcription',async(reader:any,pInfo:any)=>{
+        const isAgent=pInfo?.identity?.startsWith('agent');let buf='',segId=Math.random().toString(36).slice(2)
+        for await(const chunk of reader){buf+=chunk.text||chunk;const fin=chunk.final??false;updateRNDialerTx(segId,buf,isAgent,fin);if(fin)buf=''}
+      })
+    }
+    rnCallState='active';rnDialerSecs=0
+    if(rnDialerInt)clearInterval(rnDialerInt)
+    rnDialerInt=setInterval(()=>{rnDialerSecs++;const m=Math.floor(rnDialerSecs/60),s=rnDialerSecs%60;const dti=el('rnDialerTimer');if(dti)dti.textContent=m+':'+String(s).padStart(2,'0')},1000)
+    renderRNCarriers()
+  }catch(err:any){dbg('[RN] Error: '+(err.message||err));rnCallState='idle';rnAutoRunning=false}
+}
+async function rnInitializeUseCase(){
+  if(rnAutoRunning){stopRNSequence();return}
+  if(!rnCarriers.length||!rnParsedLoad){dbg('[RN] No carriers or load');return}
+  rnAutoRunning=true;rnCarrierIdx=0;_rnDoneSet.clear();_rnFeedRefs.clear()
+  const btn=el('rn-start-btn')
+  if(btn){btn.innerHTML='<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="4" height="10" rx="1"/><rect x="9" y="3" width="4" height="10" rx="1"/></svg> Stop';btn.classList.add('running')}
+  renderRNCarriers();updateRNDialer();await rnStartCallForCarrier(rnCarriers[0])
+}
+function rnStartCountdownToNext(){
+  if(_rnDoneSet.has(rnCarrierIdx))return
+  _rnDoneSet.add(rnCarrierIdx);renderRNCarriers()
+  const neg=rnNegotiations.find((n:any)=>n.id===rnCurrentNegId)
+  if(neg?.status==='completed'){rnSequenceComplete();return}
+  const nextCarrier=rnCarriers[rnCarrierIdx+1]
+  if(!nextCarrier){rnSequenceComplete();return}
+  let secs=6
+  const dn=el('rnDialerName'),dm=el('rnDialerMeta'),dti=el('rnDialerTimer')
+  if(dn)dn.textContent='✗ No deal — '+(rnCarriers[rnCarrierIdx]?.carrier_name||'')
+  if(dm)dm.textContent='Calling '+nextCarrier.carrier_name+' in '+secs+'…'
+  if(dti)dti.textContent=String(secs);rnDialerTxMap.clear()
+  if(rnCountdownInt)clearInterval(rnCountdownInt)
+  rnCountdownInt=setInterval(()=>{
+    secs--;if(secs>0){if(dm)dm.textContent='Calling '+nextCarrier.carrier_name+' in '+secs+'…';if(dti)dti.textContent=String(secs)}
+    else{if(rnCountdownInt)clearInterval(rnCountdownInt);rnCarrierIdx++;rnDialerSecs=0;updateRNDialer();renderRNCarriers();rnStartCallForCarrier(rnCarriers[rnCarrierIdx])}
+  },1000)
+}
+function rnSequenceComplete(){
+  rnAutoRunning=false;if(rnDialerInt)clearInterval(rnDialerInt);if(rnCountdownInt)clearInterval(rnCountdownInt);rnCallState='idle'
+  const neg=rnNegotiations.find((n:any)=>n.id===rnCurrentNegId)
+  const dn=el('rnDialerName'),dm=el('rnDialerMeta'),dti=el('rnDialerTimer'),dnx=el('rnDialerNext')
+  if(neg?.status==='completed'){if(dn)dn.textContent='✓ Deal Confirmed';if(dm)dm.textContent=neg.carrier_name+' · $'+Number(neg.final_rate).toLocaleString()}
+  else{if(dn)dn.textContent='✗ No Deal Found';if(dm)dm.textContent='All carriers exhausted'}
+  if(dti)dti.textContent='—';if(dnx)dnx.textContent='Done'
+  renderRNCarriers();renderRNNegotiations()
+  const btn=el('rn-start-btn')
+  if(btn){btn.innerHTML='<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M6 5.5l5 2.5-5 2.5V5.5z" fill="currentColor" stroke="none"/></svg> Start Negotiation';btn.classList.remove('running')}
+  setTimeout(()=>{const dcard=el('rnDialerCard');if(dcard)dcard.classList.remove('visible')},5000)
+}
+function stopRNSequence(){
+  rnAutoRunning=false;if(rnDialerInt)clearInterval(rnDialerInt);if(rnCountdownInt)clearInterval(rnCountdownInt)
+  if(rnLkRoom){const r=rnLkRoom;rnLkRoom=null;r.disconnect()}
+  rnCallState='idle';rnDialerTxMap.clear()
+  const btn=el('rn-start-btn')
+  if(btn){btn.innerHTML='<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M6 5.5l5 2.5-5 2.5V5.5z" fill="currentColor" stroke="none"/></svg> Start Negotiation';btn.classList.remove('running')}
+  const dcard=el('rnDialerCard');if(dcard)dcard.classList.remove('visible');renderRNCarriers()
+}
+async function resetRNDemo(){
+  stopRNSequence()
+  await db.from('rate_negotiations').update({status:'pending',carrier_offer:null,boss_call_status:'not_called',boss_decision:null,final_rate:null,call_summary:null,notes:null}).eq('is_demo_row',true)
+  rnNegotiations=[];_rnDoneSet.clear();_rnFeedRefs.clear();rnCarrierIdx=-1;rnCurrentNegId=null
+  renderRNCarriers();renderRNNegotiations()
+}
+function subscribeRNRealtime(){
+  db.channel('rate-negotiations')
+    .on('postgres_changes',{event:'*',schema:'public',table:'rate_negotiations'},(p:any)=>{
+      if(p.eventType==='INSERT'){rnNegotiations.unshift(p.new)}
+      else if(p.eventType==='UPDATE'){
+        const i=rnNegotiations.findIndex((n:any)=>n.id===p.new.id)
+        if(i>-1)rnNegotiations[i]=p.new;else rnNegotiations.unshift(p.new)
+        const bossEl=el('rnBossStatus')
+        if(bossEl){
+          if(p.new.boss_call_status==='calling'){bossEl.textContent='● Calling supervisor…';bossEl.className='rn-boss-status boss-calling'}
+          else if(p.new.boss_call_status==='on_call'){bossEl.textContent='● BOSS ON CALL';bossEl.className='rn-boss-status boss-on-call'}
+          else if(p.new.boss_call_status==='completed'){bossEl.textContent=p.new.boss_decision==='approved'?'✓ Approved':'✗ Rejected';bossEl.className='rn-boss-status boss-done'}
+        }
+        if(p.new.carrier_offer){const doff=el('rnDialerOffer');if(doff)doff.textContent='$'+Number(p.new.carrier_offer).toLocaleString()+' offered'}
+        if((p.new.status==='completed'||p.new.status==='failed')&&p.new.id===rnCurrentNegId&&!_rnFeedRefs.has(p.new.id)){
+          _rnFeedRefs.add(p.new.id)
+          const now=new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})
+          const tool=p.new.status==='completed'?'confirm_rate':'reject_negotiation'
+          renderFeedCard({title:p.new.carrier_name+' — '+p.new.origin+' → '+p.new.destination,who:'marcus',time_str:now,quote:p.new.call_summary||p.new.status,badge_type:'auto',tool},'feed-rn',true);incFeed('rn')
+          if(rnAutoRunning)rnStartCountdownToNext()
+        }
+      }
+      renderRNNegotiations()
+    }).subscribe()
+}
+
 // ── Tab switching ─────────────────────────────────────────────
 function switchTab(tab: string){
   activeTab=tab
-  ;['lt','cc','ar'].forEach(t=>{
-    const btn=el('t'+(t==='lt'?1:t==='cc'?2:3)),panel=el('panel-'+t),feed=el('feed-'+t)
+  ;['lt','cc','ar','rn'].forEach(t=>{
+    const idx=t==='lt'?1:t==='cc'?2:t==='ar'?3:4
+    const btn=el('t'+idx),panel=el('panel-'+t),feed=el('feed-'+t)
     if(btn)btn.className='tab-btn'+(t===tab?' active':'')
     if(panel)panel.style.display=t===tab?'flex':'none'
     if(feed)feed.style.display=t===tab?'flex':'none'
   })
-  const titles={lt:'Load Tender Feed',cc:'Carrier Check Feed',ar:'AR Collections Feed'}
+  const titles={lt:'Load Tender Feed',cc:'Carrier Check Feed',ar:'AR Collections Feed',rn:'Rate Negotiation Feed'}
   const ft=el('feedTitle'),fc=el('feedCount')
-  if(ft)ft.textContent=titles[tab as keyof typeof titles]
-  const n=feedCounts[tab as keyof typeof feedCounts]
+  if(ft)ft.textContent=titles[tab as keyof typeof titles]||''
+  const n=feedCounts[tab as keyof typeof feedCounts]||0
   if(fc)fc.textContent=n+' event'+(n!==1?'s':'')
   if(tab==='lt')setTopbarCallState(callState)
   else if(tab==='cc')syncCCBtn()
-  else syncARBtn()
+  else if(tab==='ar')syncARBtn()
+  // rn tab uses its own start button inline
 }
 function activeToggleCall(){
   if(activeTab==='lt')toggleCall()
   else if(activeTab==='cc'){if(ccAutoRunning)stopCCSequence();else ccInitializeUseCase()}
-  else{if(arAutoRunning)stopARSequence();else arInitializeUseCase()}
+  else if(activeTab==='ar'){if(arAutoRunning)stopARSequence();else arInitializeUseCase()}
+  else if(activeTab==='rn'){if(rnAutoRunning)stopRNSequence();else rnInitializeUseCase()}
 }
-function activeEndCall(){if(activeTab==='lt')endCall();else if(activeTab==='ar')stopARSequence();else hideCallModal()}
-function activeResetDemo(){if(activeTab==='lt')resetDemo();else if(activeTab==='cc')resetCCDemo();else resetARDemo()}
+function activeEndCall(){
+  if(activeTab==='lt')endCall()
+  else if(activeTab==='ar')stopARSequence()
+  else if(activeTab==='rn')stopRNSequence()
+  else hideCallModal()
+}
+function activeResetDemo(){
+  if(activeTab==='lt')resetDemo()
+  else if(activeTab==='cc')resetCCDemo()
+  else if(activeTab==='ar')resetARDemo()
+  else if(activeTab==='rn')resetRNDemo()
+}
 
 // ── React component ───────────────────────────────────────────
 export default function Page() {
@@ -769,6 +1026,7 @@ export default function Page() {
     loadData(); subscribeRealtime()
     loadCCData(); subscribeCCRealtime()
     loadARData(); subscribeARRealtime()
+    loadRNData(); subscribeRNRealtime()
     setTimeout(()=>{
       const pill=el('statusPill'),txt=el('statusText')
       if(pill&&txt&&pill.className.includes('connecting')){pill.className='status-pill idle';txt.textContent='Ready'}
@@ -831,6 +1089,12 @@ export default function Page() {
             <path d="M8 2v12M5 5h4.5a1.5 1.5 0 0 1 0 3H6a1.5 1.5 0 0 0 0 3H11"/>
           </svg>
           AR Collections
+        </button>
+        <button className="tab-btn" id="t4" onClick={()=>switchTab('rn')}>
+          <svg className="tab-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M2 11l4-4 3 3 5-6"/><path d="M12 5h2v2"/>
+          </svg>
+          Rate Negotiation
         </button>
       </div>
 
@@ -1022,6 +1286,81 @@ export default function Page() {
             </div>
           </div>
 
+          {/* RATE NEGOTIATION */}
+          <div id="panel-rn" style={{display:'none',flexDirection:'column',gap:'var(--space-5)'}}>
+            <div className="brand-banner">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" style={{flexShrink:0}}><path d="M2 11l4-4 3 3 5-6"/><path d="M12 5h2v2"/></svg>
+              <span><strong>Rate Negotiation auto-dialer.</strong> Marcus calls carriers sequentially on your lane, negotiates the best rate, and loops in the boss before committing.</span>
+            </div>
+
+            {/* Load requirement input */}
+            <div className="section-card">
+              <div className="section-label">Load Requirement</div>
+              <textarea id="rn-load-input" className="rn-load-textarea" placeholder={"Paste load requirement here…\nExample: From Chicago, IL to Dallas, TX · 42,000 lbs · Refrigerated"}></textarea>
+              <div id="rn-parsed" className="rn-parsed-row" style={{display:'none'}}></div>
+              <div style={{display:'flex',gap:'var(--space-3)',marginTop:'var(--space-3)'}}>
+                <button className="btn-search" onClick={()=>searchCarriersForLane()}>
+                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="7" cy="7" r="4"/><path d="m10 10 3 3"/></svg>
+                  Search Carriers
+                </button>
+                <button id="rn-start-btn" className="btn-call" style={{flex:1}} onClick={()=>rnInitializeUseCase()} disabled>
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="8" cy="8" r="6"/><path d="M6 5.5l5 2.5-5 2.5V5.5z" fill="currentColor" stroke="none"/></svg>
+                  Start Negotiation
+                </button>
+              </div>
+            </div>
+
+            {/* Lane corridor */}
+            <div className="section-card">
+              <div className="section-label">Lane Rate Corridor</div>
+              <div className="rn-corridor-row">
+                <div className="rn-corridor-item"><span className="corridor-label">Floor</span><span id="rn-floor" className="corridor-value corridor-floor">—</span></div>
+                <div className="rn-corridor-item"><span className="corridor-label">Target</span><span id="rn-target" className="corridor-value corridor-target">—</span></div>
+                <div className="rn-corridor-item"><span className="corridor-label">Ceiling</span><span id="rn-ceil" className="corridor-value corridor-ceil">—</span></div>
+              </div>
+            </div>
+
+            {/* Carrier table */}
+            <div className="section-card" style={{padding:0}}>
+              <div className="table-head rn-cols" style={{padding:'var(--space-3) var(--space-4)'}}>
+                <div>Carrier</div><div>Avg Rate</div><div>Last Rate</div><div>Loads</div><div>Last Load</div><div>Status</div><div>Outcome</div>
+              </div>
+              <div id="rn-carrier-body">
+                <div className="feed-empty">Search for a lane to see carriers.</div>
+              </div>
+            </div>
+
+            {/* Inline dialer card */}
+            <div className="dialer-card" id="rnDialerCard">
+              <div className="dialer-header">
+                <div>
+                  <div className="dialer-name" id="rnDialerName">—</div>
+                  <div className="dialer-meta" id="rnDialerMeta"></div>
+                  <div id="rnDialerOffer" style={{fontSize:'var(--text-xs)',color:'var(--amber-400)',fontWeight:'var(--weight-medium)',marginTop:'2px'}}></div>
+                  <div id="rnBossStatus" className="rn-boss-status"></div>
+                </div>
+                <div style={{textAlign:'right'}}>
+                  <div style={{fontSize:'var(--text-xs)',color:'var(--slate-400)',marginBottom:'2px'}}>
+                    <span id="rnDialerCurrent">0</span> of <span id="rnDialerTotal">0</span>
+                  </div>
+                  <div className="dialer-timer" id="rnDialerTimer">0:00</div>
+                  <div style={{fontSize:'var(--text-xs)',color:'var(--slate-400)',marginTop:'4px'}}>
+                    Next: <span id="rnDialerNext" style={{color:'var(--text-primary)'}}>—</span>
+                  </div>
+                </div>
+              </div>
+              <div className="dialer-transcript" id="rnDialerTranscript"></div>
+            </div>
+
+            {/* Negotiation history */}
+            <div className="section-card" style={{padding:0}}>
+              <div className="table-head rn-neg-cols" style={{padding:'var(--space-3) var(--space-4)'}}>
+                <div>Carrier</div><div>Offered</div><div>Final Rate</div><div>Summary</div>
+              </div>
+              <div id="rn-neg-body"></div>
+            </div>
+          </div>
+
         </div>
 
         <div className="right-panel">
@@ -1032,6 +1371,7 @@ export default function Page() {
           <div className="feed-body" id="feed-lt" style={{display:'none'}}></div>
           <div className="feed-body" id="feed-cc"></div>
           <div className="feed-body" id="feed-ar" style={{display:'none'}}></div>
+          <div className="feed-body" id="feed-rn" style={{display:'none'}}></div>
         </div>
       </div>
 
