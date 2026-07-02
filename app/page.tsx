@@ -83,6 +83,7 @@ const arDialerTxMap=new Map<string,HTMLElement>(),_arFeedRefs=new Set<string>()
 
 // ── RN (Rate Negotiation) state ───────────────────────────────
 let rnParsedLoad:{origin:string,destination:string,weight:number,commodity:string}|null=null
+let rnLoadRef:string|null=null
 let rnLaneRates:any=null,rnCarriers:any[]=[],rnNegotiations:any[]=[]
 let rnAutoRunning=false,rnCarrierIdx=-1,rnCurrentNegId:number|null=null
 let rnLkRoom:any=null,rnCallState='idle',rnDialerSecs=0
@@ -780,11 +781,19 @@ function renderRNLaneCorridor(){
   if(te)te.textContent=lr?'$'+Number(lr.target_rate).toLocaleString():'—'
   if(ce)ce.textContent=lr?'$'+Number(lr.ceiling_rate).toLocaleString():'—'
 }
+function rnCarrierResolved(idx:number){
+  const c=rnCarriers[idx];if(!c)return false
+  if(_rnDoneSet.has(idx))return true
+  return rnNegotiations.some((n:any)=>n.carrier_name===c.carrier_name&&(n.status==='completed'||n.status==='failed'))
+}
+function rnNextUnresolvedIdx(fromIdx:number){
+  let i=fromIdx;while(i<rnCarriers.length&&rnCarrierResolved(i))i++;return i
+}
 function renderRNCarriers(){
   const body=el('rn-carrier-body');if(!body)return
   if(!rnCarriers.length){body.innerHTML='<div class="feed-empty">No carrier history for this lane.</div>';return}
   body.innerHTML=rnCarriers.map((c:any,i:number)=>{
-    const isDone=_rnDoneSet.has(i),isActive=rnAutoRunning&&rnCarrierIdx===i
+    const isDone=rnCarrierResolved(i),isActive=rnAutoRunning&&rnCarrierIdx===i
     const st=isActive?'in_progress':isDone?'completed':'not_called'
     const neg=isDone?rnNegotiations.find((n:any)=>n.carrier_name===c.carrier_name&&(n.status==='completed'||n.status==='failed')):null
     const outcome=neg?.call_summary?`<div class="cell-summary">"${neg.call_summary}"</div>`:(isDone?callStatusChip(neg?.status==='completed'?'completed':'failed'):'')
@@ -811,11 +820,15 @@ function renderRNNegotiations(){
     }
     const chip=statusMap[n.status]||`<span class="chip">${n.status}</span>`
     const summary=n.call_summary?`<div class="cell-summary">"${n.call_summary}"</div>`:chip
+    const bookingBits=[]
+    if(n.driver_name)bookingBits.push('Driver: '+n.driver_name+(n.driver_phone?' ('+n.driver_phone+')':''))
+    if(n.mc_number)bookingBits.push('MC '+n.mc_number+(n.insurance_verified?' · Insurance ✓':''))
+    const booking=bookingBits.length?`<div class="cell-muted" style="font-size:var(--text-xs);margin-top:2px">${bookingBits.join(' · ')}</div>`:''
     return `<div class="table-row rn-neg-cols${n.status==='completed'?' row-highlight':''}">
       <div><div class="cell-primary">${n.carrier_name||'—'}</div></div>
       <div class="cell-amount">${n.carrier_offer?'$'+Number(n.carrier_offer).toLocaleString():'—'}</div>
       <div class="cell-amount">${n.final_rate?'$'+Number(n.final_rate).toLocaleString():'—'}</div>
-      <div>${summary}</div>
+      <div>${summary}${booking}</div>
     </div>`
   }).join('')
 }
@@ -833,6 +846,7 @@ async function searchCarriersForLane(){
     pe.style.display='flex'
   }
   if(!parsed.origin||!parsed.destination)return
+  rnLoadRef='RN-'+Math.floor(1000+Math.random()*9000)
   const {data:lr}=await db.from('lane_rates').select('*').eq('origin',parsed.origin).eq('destination',parsed.destination).limit(1)
   rnLaneRates=lr?.[0]||null;renderRNLaneCorridor()
   rnCarriers=await fetchCarriersForLane(parsed.origin,parsed.destination)
@@ -861,12 +875,22 @@ function updateRNDialerTx(segId:string,text:string,isAgent:boolean,isFinal:boole
 }
 async function rnStartCallForCarrier(carrier:any){
   if(!rnParsedLoad)return
+  const position=rnCarriers.findIndex((x:any)=>x.carrier_name===carrier.carrier_name)+1
+  const pickupAddress=rnParsedLoad.origin+' Distribution Center'
+  const deliveryAddress=rnParsedLoad.destination+' Receiving Dock'
+  const pickupTime='Tomorrow, 8:00 AM'
+  const deliveryTime='2 days transit, by 2:00 PM'
+  const detentionTerms='$75/hour after 2 free hours at pickup and delivery'
+  const quickPayPct=2
   const {data:neg,error}=await db.from('rate_negotiations').insert({
     origin:rnParsedLoad.origin,destination:rnParsedLoad.destination,
     weight_lbs:rnParsedLoad.weight||null,commodity:rnParsedLoad.commodity,
     carrier_name:carrier.carrier_name,floor_rate:rnLaneRates?.floor_rate||null,
     target_rate:rnLaneRates?.target_rate||null,ceiling_rate:rnLaneRates?.ceiling_rate||null,
     status:'negotiating',is_demo_row:true,
+    load_ref:rnLoadRef,pickup_address:pickupAddress,delivery_address:deliveryAddress,
+    pickup_time:pickupTime,delivery_time:deliveryTime,detention_terms:detentionTerms,
+    quick_pay_pct:quickPayPct,call_list_position:position,call_list_total:rnCarriers.length,
   }).select().single()
   if(error||!neg){dbg('[RN] Insert error: '+(error?.message));return}
   rnCurrentNegId=neg.id;rnNegotiations.unshift(neg);renderRNNegotiations()
@@ -889,6 +913,9 @@ async function rnStartCallForCarrier(carrier:any){
       origin:rnParsedLoad.origin,destination:rnParsedLoad.destination,
       weight_lbs:rnParsedLoad.weight,commodity:rnParsedLoad.commodity,
       floor_rate:rnLaneRates?.floor_rate,target_rate:rnLaneRates?.target_rate,ceiling_rate:rnLaneRates?.ceiling_rate,
+      load_ref:rnLoadRef,pickup_address:pickupAddress,delivery_address:deliveryAddress,
+      pickup_time:pickupTime,delivery_time:deliveryTime,detention_terms:detentionTerms,
+      quick_pay_pct:quickPayPct,call_list_position:position,call_list_total:rnCarriers.length,
     })
     await thisRoom.localParticipant.setMicrophoneEnabled(true)
     if(typeof thisRoom.registerTextStreamHandler==='function'){
@@ -906,18 +933,22 @@ async function rnStartCallForCarrier(carrier:any){
 async function rnInitializeUseCase(){
   if(rnAutoRunning){stopRNSequence();return}
   if(!rnCarriers.length||!rnParsedLoad){dbg('[RN] No carriers or load');return}
-  rnAutoRunning=true;rnCarrierIdx=0;_rnDoneSet.clear();_rnFeedRefs.clear()
+  _rnDoneSet.clear()
+  const startIdx=rnNextUnresolvedIdx(0)
+  if(startIdx>=rnCarriers.length){dbg('[RN] All carriers on this lane already resolved — Reset Demo to try again');return}
+  rnAutoRunning=true;rnCarrierIdx=startIdx;_rnFeedRefs.clear()
   const btn=el('rn-start-btn')
   if(btn){btn.innerHTML='<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="4" height="10" rx="1"/><rect x="9" y="3" width="4" height="10" rx="1"/></svg> Stop';btn.classList.add('running')}
   const endBtn=el('rn-end-btn');if(endBtn)(endBtn as HTMLButtonElement).disabled=false
-  renderRNCarriers();updateRNDialer();await rnStartCallForCarrier(rnCarriers[0])
+  renderRNCarriers();updateRNDialer();await rnStartCallForCarrier(rnCarriers[rnCarrierIdx])
 }
 function rnStartCountdownToNext(){
   if(_rnDoneSet.has(rnCarrierIdx))return
   _rnDoneSet.add(rnCarrierIdx);renderRNCarriers()
   const neg=rnNegotiations.find((n:any)=>n.id===rnCurrentNegId)
-  if(neg?.status==='completed'){rnSequenceComplete();return}
-  const nextCarrier=rnCarriers[rnCarrierIdx+1]
+  if(neg?.status==='completed'){rnCancelRemainingCarriers(rnCarrierIdx);rnSequenceComplete();return}
+  const nextIdx=rnNextUnresolvedIdx(rnCarrierIdx+1)
+  const nextCarrier=rnCarriers[nextIdx]
   if(!nextCarrier){rnSequenceComplete();return}
   let secs=6
   const dn=el('rnDialerName'),dm=el('rnDialerMeta'),dti=el('rnDialerTimer')
@@ -927,8 +958,24 @@ function rnStartCountdownToNext(){
   if(rnCountdownInt)clearInterval(rnCountdownInt)
   rnCountdownInt=setInterval(()=>{
     secs--;if(secs>0){if(dm)dm.textContent='Calling '+nextCarrier.carrier_name+' in '+secs+'…';if(dti)dti.textContent=String(secs)}
-    else{if(rnCountdownInt)clearInterval(rnCountdownInt);rnCarrierIdx++;rnDialerSecs=0;updateRNDialer();renderRNCarriers();rnStartCallForCarrier(rnCarriers[rnCarrierIdx])}
+    else{if(rnCountdownInt)clearInterval(rnCountdownInt);rnCarrierIdx=nextIdx;rnDialerSecs=0;updateRNDialer();renderRNCarriers();rnStartCallForCarrier(rnCarriers[rnCarrierIdx])}
   },1000)
+}
+async function rnCancelRemainingCarriers(bookedIdx:number){
+  if(!rnParsedLoad)return
+  const remaining=rnCarriers.filter((_,i)=>i>bookedIdx&&!rnCarrierResolved(i))
+  if(!remaining.length)return
+  const rows=remaining.map((c:any)=>({
+    origin:rnParsedLoad!.origin,destination:rnParsedLoad!.destination,load_ref:rnLoadRef,
+    carrier_name:c.carrier_name,floor_rate:rnLaneRates?.floor_rate||null,
+    target_rate:rnLaneRates?.target_rate||null,ceiling_rate:rnLaneRates?.ceiling_rate||null,
+    status:'failed',decline_reason:'covered_elsewhere',
+    call_list_position:rnCarriers.findIndex((x:any)=>x.carrier_name===c.carrier_name)+1,
+    call_list_total:rnCarriers.length,
+    call_summary:'Load covered by another carrier — call not made.',is_demo_row:true,
+  }))
+  await db.from('rate_negotiations').insert(rows)
+  await loadRNData();renderRNCarriers()
 }
 function rnSequenceComplete(){
   rnAutoRunning=false;if(rnDialerInt)clearInterval(rnDialerInt);if(rnCountdownInt)clearInterval(rnCountdownInt);rnCallState='idle'
@@ -954,9 +1001,12 @@ function stopRNSequence(){
 }
 async function resetRNDemo(){
   stopRNSequence()
-  await db.from('rate_negotiations').update({status:'pending',carrier_offer:null,boss_call_status:'not_called',boss_decision:null,final_rate:null,call_summary:null,notes:null}).eq('is_demo_row',true)
-  rnNegotiations=[];_rnDoneSet.clear();_rnFeedRefs.clear();rnCarrierIdx=-1;rnCurrentNegId=null
-  renderRNCarriers();renderRNNegotiations()
+  // Wipe session-created rows (live negotiations + simulated cancellations) but keep
+  // the permanent pre-seeded call-list declines (no_capacity / rate_too_low).
+  await db.from('rate_negotiations').delete().eq('is_demo_row',true)
+    .or('decline_reason.is.null,decline_reason.eq.covered_elsewhere')
+  rnNegotiations=[];_rnDoneSet.clear();_rnFeedRefs.clear();rnCarrierIdx=-1;rnCurrentNegId=null;rnLoadRef=null
+  await loadRNData();renderRNCarriers();renderRNNegotiations()
 }
 function subscribeRNRealtime(){
   db.channel('rate-negotiations')
