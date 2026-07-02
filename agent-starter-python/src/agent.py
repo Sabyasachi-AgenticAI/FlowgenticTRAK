@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -7,7 +8,7 @@ from datetime import date, timedelta
 
 import httpx
 from dotenv import load_dotenv
-from livekit import api
+from livekit import api, rtc
 from livekit.agents import (
     Agent,
     AgentServer,
@@ -32,6 +33,7 @@ load_dotenv(".env.local")
 
 SUPA_URL = os.getenv("SUPABASE_URL", "")
 SUPA_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
+LIVEKIT_URL = os.getenv("LIVEKIT_URL", "")
 
 
 # ── Supabase REST helpers ─────────────────────────────────────
@@ -534,6 +536,69 @@ class ARCollectionsAgent(Agent):
         )
 
 
+# ── Private supervisor consult (used by RateNegotiationAgent) ──
+class _BossConsultAgent(Agent):
+    """Runs in a private consult room with the supervisor only.
+    The carrier is on hold in a different room and never hears this."""
+
+    def __init__(self, deal_summary: str, decision: asyncio.Future) -> None:
+        self._decision = decision
+        super().__init__(
+            instructions=textwrap.dedent(f"""\
+                You are Marcus, calling your supervisor privately to get sign-off on a carrier
+                rate. This is an internal call — the carrier cannot hear any of this.
+
+                # The deal
+                {deal_summary}
+
+                # Output rules
+                Brief and direct. One or two sentences per turn. No markdown or symbols.
+
+                # Call flow
+                1. Open with ONLY: "Hey, quick one for you." Then state the deal in one sentence
+                   and ask: "Do I have your approval at this rate?"
+                2. If they approve — at the carrier's number or a different number they'll
+                   accept — call approve_rate with that final number.
+                3. If they reject outright, call reject_rate with their reason.
+                4. Do not speak after calling approve_rate or reject_rate.
+
+                # Guardrails
+                - Only talk to the supervisor — never mention the carrier.
+                - If there's no clear answer after a reasonable back-and-forth, ask once more
+                  directly, then call reject_rate with reason "no clear decision" rather than guessing.
+            """),
+        )
+        # No on_enter auto-greeting here — the supervisor hasn't picked up yet when this
+        # session starts. call_boss_for_approval triggers the greeting once they answer.
+
+    @function_tool
+    async def approve_rate(self, context: RunContext, final_rate: float, notes: str = "") -> str:
+        """Record supervisor approval for the rate. Call once they've clearly said yes.
+
+        Args:
+            final_rate: The rate the supervisor approved (may differ from the carrier's ask)
+            notes: Any conditions or notes from the supervisor
+        """
+        if not self._decision.done():
+            self._decision.set_result(("approved", final_rate, notes))
+        farewell = context.session.say("Perfect, thanks — talk soon.", allow_interruptions=False)
+        await farewell.wait_for_playout()
+        return "Approval recorded."
+
+    @function_tool
+    async def reject_rate(self, context: RunContext, reason: str) -> str:
+        """Record supervisor rejection. Call if they decline the rate.
+
+        Args:
+            reason: Why the supervisor rejected it
+        """
+        if not self._decision.done():
+            self._decision.set_result(("rejected", None, reason))
+        farewell = context.session.say("Understood, thanks.", allow_interruptions=False)
+        await farewell.wait_for_playout()
+        return "Rejection recorded."
+
+
 # ══════════════════════════════════════════════════════════════
 # PERSONA 4 — Rate Negotiation (outbound, Marcus)
 # ══════════════════════════════════════════════════════════════
@@ -593,9 +658,12 @@ class RateNegotiationAgent(Agent):
                 1. Open: "Hey, this is Marcus from Saturn Freight — you got capacity available right now?"
                 2. State: "{self.origin} to {self.destination}, {weight_str}, {self.commodity} — what's your best rate?"
                 3. Negotiate and counter until carrier gives a firm number.
-                4. Call call_boss_for_approval with that number.
-                5. Supervisor joins — present the deal to them directly.
-                6. After supervisor decision: confirm_rate (approved) or reject_negotiation (rejected).
+                4. Call call_boss_for_approval with that number. The carrier is placed on hold
+                   automatically while you consult the supervisor privately — they cannot hear that call.
+                   Say something like "Let me check on that — one moment" right before calling it.
+                5. When call_boss_for_approval returns, you'll be back with the carrier and know the
+                   supervisor's decision. Continue the conversation from there.
+                6. After the decision: confirm_rate (approved) or reject_negotiation (rejected).
 
                 # Guardrails
                 - One question per turn.
@@ -606,19 +674,6 @@ class RateNegotiationAgent(Agent):
         )
 
     async def on_enter(self) -> None:
-        job_ctx = get_job_context()
-
-        @job_ctx.room.on("participant_disconnected")
-        def _on_disconnect(participant) -> None:
-            if participant.identity == "boss-approval":
-                asyncio.create_task(
-                    _supa_patch(
-                        "rate_negotiations",
-                        {"id": self.negotiation_id},
-                        {"boss_call_status": "completed"},
-                    )
-                )
-
         await self.session.generate_reply()
 
     async def _hangup(self) -> None:
@@ -634,8 +689,9 @@ class RateNegotiationAgent(Agent):
         carrier_rate: float,
         justification: str,
     ) -> str:
-        """Call the supervisor for rate approval. Always call this before committing to any rate.
-        The supervisor joins the current call — present the deal to them directly.
+        """Call the supervisor privately for rate approval. Always call this before committing
+        to any rate. The carrier is placed on hold and cannot hear this consult — you'll return
+        to them automatically once the supervisor decides.
 
         Args:
             carrier_rate: The carrier's offered rate as a number (e.g. 3050)
@@ -643,8 +699,8 @@ class RateNegotiationAgent(Agent):
         """
         if self.boss_called:
             return "Supervisor already contacted. Act on their decision."
-
         self.boss_called = True
+
         job_ctx = get_job_context()
         sip_trunk_id = os.getenv("SIP_OUTBOUND_TRUNK_ID", "")
         boss_phone = os.getenv("BOSS_PHONE", "")
@@ -655,37 +711,106 @@ class RateNegotiationAgent(Agent):
             {"carrier_offer": carrier_rate, "boss_call_status": "calling", "status": "pending_approval"},
         )
 
+        # Hold the carrier — they can't hear or be heard during the supervisor consult.
+        context.session.input.set_audio_enabled(False)
+        context.session.output.set_audio_enabled(False)
+
+        consult_room_name = f"{job_ctx.room.name}-consult"
+        consult_room = rtc.Room()
+        decision: asyncio.Future = asyncio.get_running_loop().create_future()
+        consult_session: AgentSession | None = None
+
         try:
+            token = (
+                api.AccessToken()
+                .with_identity("boss-consult-agent")
+                .with_grants(
+                    api.VideoGrants(
+                        room_join=True,
+                        room=consult_room_name,
+                        can_publish=True,
+                        can_subscribe=True,
+                    )
+                )
+                .to_jwt()
+            )
+            await consult_room.connect(LIVEKIT_URL, token)
+
+            consult_session = AgentSession(
+                llm=openai_plugin.LLM(model="gpt-4o-mini"),
+                stt=deepgram.STT(model="nova-3-general", language="en"),
+                tts=cartesia.TTS(
+                    model="sonic-3",
+                    voice="9626c31c-bec5-4cca-baa8-f8ba9e84c8bc",
+                ),
+                vad=job_ctx.proc.userdata["vad"],
+            )
+            deal_summary = (
+                f"{self.carrier_name} is quoting ${carrier_rate:,.0f} for {self.origin} to "
+                f"{self.destination}, {self.weight_lbs:,} lbs {self.commodity}. {justification}."
+            )
+            await consult_session.start(
+                agent=_BossConsultAgent(deal_summary, decision),
+                room=consult_room,
+            )
+
             await job_ctx.api.sip.create_sip_participant(
                 api.CreateSIPParticipantRequest(
                     sip_trunk_id=sip_trunk_id,
                     sip_call_to=boss_phone,
-                    room_name=job_ctx.room.name,
+                    room_name=consult_room_name,
                     participant_identity="boss-approval",
                     participant_name="Supervisor",
                     play_dialtone=True,
+                    wait_until_answered=True,
                 )
             )
+            await _supa_patch(
+                "rate_negotiations",
+                {"id": self.negotiation_id},
+                {"boss_call_status": "on_call"},
+            )
+
+            # Supervisor has picked up — safe to greet them now.
+            await consult_session.generate_reply()
+
+            outcome, final_rate, notes = await asyncio.wait_for(decision, timeout=180)
         except Exception as e:
-            logger.error("SIP boss call failed: %s", e)
+            logger.error("Boss consult failed: %s", e)
             await _supa_patch(
                 "rate_negotiations",
                 {"id": self.negotiation_id},
                 {"boss_call_status": "failed"},
             )
+            context.session.input.set_audio_enabled(True)
+            context.session.output.set_audio_enabled(True)
             return "Could not reach supervisor. Use your best judgment and proceed."
+        finally:
+            if consult_session is not None:
+                await consult_session.aclose()
+            await consult_room.disconnect()
+            with contextlib.suppress(Exception):
+                await job_ctx.api.room.delete_room(api.DeleteRoomRequest(room=consult_room_name))
+
+        # Resume the carrier call.
+        context.session.input.set_audio_enabled(True)
+        context.session.output.set_audio_enabled(True)
 
         await _supa_patch(
             "rate_negotiations",
             {"id": self.negotiation_id},
-            {"boss_call_status": "on_call"},
+            {"boss_call_status": "completed", "boss_decision": outcome},
         )
 
+        if outcome == "approved":
+            return (
+                f"Supervisor approved at ${final_rate:,.0f}. "
+                f"Confirm the deal with the carrier now by calling confirm_rate."
+            )
         return (
-            f"Supervisor is now on the line. Present: {self.carrier_name} is quoting "
-            f"${carrier_rate:,.0f} for {self.origin} to {self.destination}, "
-            f"{self.weight_lbs:,} lbs {self.commodity}. {justification}. "
-            f"Ask: 'Do I have your approval at this rate?'"
+            f"Supervisor rejected the rate. Reason: {notes}. "
+            f"Tell the carrier you can't make the numbers work, or counter once more if appropriate, "
+            f"then call reject_negotiation if there's no deal."
         )
 
     @function_tool
