@@ -909,6 +909,7 @@ async function rnInitializeUseCase(){
   rnAutoRunning=true;rnCarrierIdx=0;_rnDoneSet.clear();_rnFeedRefs.clear()
   const btn=el('rn-start-btn')
   if(btn){btn.innerHTML='<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="4" height="10" rx="1"/><rect x="9" y="3" width="4" height="10" rx="1"/></svg> Stop';btn.classList.add('running')}
+  const endBtn=el('rn-end-btn');if(endBtn)(endBtn as HTMLButtonElement).disabled=false
   renderRNCarriers();updateRNDialer();await rnStartCallForCarrier(rnCarriers[0])
 }
 function rnStartCountdownToNext(){
@@ -939,6 +940,7 @@ function rnSequenceComplete(){
   renderRNCarriers();renderRNNegotiations()
   const btn=el('rn-start-btn')
   if(btn){btn.innerHTML='<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M6 5.5l5 2.5-5 2.5V5.5z" fill="currentColor" stroke="none"/></svg> Start Negotiation';btn.classList.remove('running')}
+  const endBtn=el('rn-end-btn');if(endBtn)(endBtn as HTMLButtonElement).disabled=true
   setTimeout(()=>{const dcard=el('rnDialerCard');if(dcard)dcard.classList.remove('visible')},5000)
 }
 function stopRNSequence(){
@@ -947,6 +949,7 @@ function stopRNSequence(){
   rnCallState='idle';rnDialerTxMap.clear()
   const btn=el('rn-start-btn')
   if(btn){btn.innerHTML='<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M6 5.5l5 2.5-5 2.5V5.5z" fill="currentColor" stroke="none"/></svg> Start Negotiation';btn.classList.remove('running')}
+  const endBtn=el('rn-end-btn');if(endBtn)(endBtn as HTMLButtonElement).disabled=true
   const dcard=el('rnDialerCard');if(dcard)dcard.classList.remove('visible');renderRNCarriers()
 }
 async function resetRNDemo(){
@@ -1306,6 +1309,14 @@ export default function Page() {
                 <button id="rn-start-btn" className="btn-call" style={{flex:1}} onClick={()=>rnInitializeUseCase()} disabled>
                   <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="8" cy="8" r="6"/><path d="M6 5.5l5 2.5-5 2.5V5.5z" fill="currentColor" stroke="none"/></svg>
                   Start Negotiation
+                </button>
+                <button id="rn-end-btn" className="btn-end-call-inline" onClick={()=>stopRNSequence()} disabled>
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M14 11.5v-1.38a1.5 1.5 0 0 0-1.035-1.429l-1.5-.5a1.5 1.5 0 0 0-1.59.418l-.35.4C8.11 9.05 7.09 9.05 5.975 8.535l-.1-.05C4.76 7.97 3.97 7.19 3.49 6.475l.41-.36a1.5 1.5 0 0 0 .418-1.59l-.5-1.5A1.5 1.5 0 0 0 2.38 2H1" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/><path d="M12 4l-4 4M8 4l4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                  End Call
+                </button>
+                <button className="btn-reset-inline" onClick={()=>resetRNDemo()}>
+                  <svg width="11" height="11" viewBox="0 0 14 14" fill="none"><path d="M2 7A5 5 0 1 0 7 2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/><path d="M7 2 5 4.5 7.5 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  Reset Demo
                 </button>
               </div>
             </div>

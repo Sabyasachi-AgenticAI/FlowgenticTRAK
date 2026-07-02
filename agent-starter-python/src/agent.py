@@ -35,6 +35,9 @@ SUPA_URL = os.getenv("SUPABASE_URL", "")
 SUPA_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
 LIVEKIT_URL = os.getenv("LIVEKIT_URL", "")
 
+VOICE_ARIA = "9626c31c-bec5-4cca-baa8-f8ba9e84c8bc"  # Jacqueline - confident young American female
+VOICE_MARCUS = "c0f43c66-9f21-4034-b485-8f1d3340d759"  # Clarkson - Executive Tone, confident businesslike male
+
 
 # ── Supabase REST helpers ─────────────────────────────────────
 def _supa_headers() -> dict:
@@ -741,7 +744,7 @@ class RateNegotiationAgent(Agent):
                 stt=deepgram.STT(model="nova-3-general", language="en"),
                 tts=cartesia.TTS(
                     model="sonic-3",
-                    voice="9626c31c-bec5-4cca-baa8-f8ba9e84c8bc",
+                    voice=VOICE_MARCUS,
                 ),
                 vad=job_ctx.proc.userdata["vad"],
             )
@@ -935,7 +938,7 @@ async def my_agent(ctx: JobContext):
         stt=deepgram.STT(model="nova-3-general", language="en"),
         tts=cartesia.TTS(
             model="sonic-3",
-            voice="9626c31c-bec5-4cca-baa8-f8ba9e84c8bc",  # Jacqueline - confident young American female
+            voice=VOICE_MARCUS if use_case == "rate_negotiation" else VOICE_ARIA,
         ),
         turn_detection=MultilingualModel(),
         vad=ctx.proc.userdata["vad"],
