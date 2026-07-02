@@ -619,17 +619,47 @@ class RateNegotiationAgent(Agent):
         self.ceiling_rate = float(meta.get("ceiling_rate") or 0)
         self.boss_called = False
 
+        load_ref = meta.get("load_ref", "")
+        pickup_address = meta.get("pickup_address", "")
+        delivery_address = meta.get("delivery_address", "")
+        pickup_time = meta.get("pickup_time", "")
+        delivery_time = meta.get("delivery_time", "")
+        detention_terms = meta.get("detention_terms") or "$75/hour after 2 free hours at pickup and delivery"
+        quick_pay_pct = meta.get("quick_pay_pct")
+        self.call_list_position = meta.get("call_list_position")
+        self.call_list_total = meta.get("call_list_total")
+
         weight_str = f"{self.weight_lbs:,} lbs" if self.weight_lbs else "full truckload"
+
+        load_lines = []
+        if load_ref:
+            load_lines.append(f"Load ref: {load_ref}")
+        load_lines.append(f"Lane: {self.origin} → {self.destination}")
+        load_lines.append(f"Weight: {weight_str}")
+        load_lines.append(f"Commodity: {self.commodity}")
+        if pickup_address:
+            load_lines.append(f"Pickup: {pickup_address}" + (f" — {pickup_time}" if pickup_time else ""))
+        if delivery_address:
+            load_lines.append(f"Delivery: {delivery_address}" + (f" — {delivery_time}" if delivery_time else ""))
+        load_lines.append(f"Detention terms: {detention_terms}")
+        if quick_pay_pct:
+            load_lines.append(f"Quick pay available at {quick_pay_pct}% if the carrier asks about payment speed")
+        load_block = "\n                ".join(load_lines)
+
+        call_list_line = ""
+        if self.call_list_position and self.call_list_total:
+            call_list_line = (
+                f"\n                This is carrier {self.call_list_position} of "
+                f"{self.call_list_total} on this load's call list — others already declined.\n"
+            )
 
         super().__init__(
             instructions=textwrap.dedent(f"""\
                 You are Marcus, a freight rate negotiation specialist at Saturn Freight Systems.
                 You are making an outbound call to {self.carrier_name} to negotiate a spot rate.
-
+                {call_list_line}
                 # Load details
-                Lane: {self.origin} → {self.destination}
-                Weight: {weight_str}
-                Commodity: {self.commodity}
+                {load_block}
 
                 # Rate corridor — CONFIDENTIAL, never reveal these to the carrier
                 Floor (absolute minimum we pay): ${self.floor_rate:,.0f}
@@ -644,6 +674,16 @@ class RateNegotiationAgent(Agent):
                 - Carrier ABOVE ceiling → counter firmly at target. If they won't move below ceiling, call reject_negotiation.
                 - Never accept a rate on the spot — procedure requires supervisor sign-off every time.
                 - Be confident and direct. You have done hundreds of these calls.
+
+                # Persuasion tactics
+                If the carrier hesitates, pushes back on rate, mentions fuel costs, gives a tough
+                final counter, or acts like a tough negotiator, call get_persuasion_tactic with the
+                matching trigger before responding:
+                carrier_hesitating, carrier_above_ceiling, carrier_mentions_fuel,
+                carrier_mentions_concerns, carrier_final_counter, carrier_tough_negotiator,
+                owner_operator_tough.
+                Weave the returned angle into your own words naturally — never read it verbatim,
+                and don't call it more than once or twice per call.
 
                 # Output rules
                 - Phone call tone: brief, direct, commercial. Two sentences max per turn.
@@ -660,13 +700,16 @@ class RateNegotiationAgent(Agent):
                 # Call flow
                 1. Open: "Hey, this is Marcus from Saturn Freight — you got capacity available right now?"
                 2. State: "{self.origin} to {self.destination}, {weight_str}, {self.commodity} — what's your best rate?"
-                3. Negotiate and counter until carrier gives a firm number.
+                3. Negotiate and counter until carrier gives a firm number. Use get_persuasion_tactic
+                   when they push back (see above).
                 4. Call call_boss_for_approval with that number. The carrier is placed on hold
                    automatically while you consult the supervisor privately — they cannot hear that call.
                    Say something like "Let me check on that — one moment" right before calling it.
                 5. When call_boss_for_approval returns, you'll be back with the carrier and know the
                    supervisor's decision. Continue the conversation from there.
-                6. After the decision: confirm_rate (approved) or reject_negotiation (rejected).
+                6. If approved: confirm the carrier's MC number and that their insurance is current,
+                   then get the driver's full name and cell number who will run this load.
+                7. Call confirm_rate with all of that, or reject_negotiation if rejected.
 
                 # Guardrails
                 - One question per turn.
@@ -684,6 +727,22 @@ class RateNegotiationAgent(Agent):
         await job_ctx.api.room.delete_room(
             api.DeleteRoomRequest(room=job_ctx.room.name)
         )
+
+    @function_tool
+    async def get_persuasion_tactic(self, context: RunContext, trigger: str) -> str:
+        """Look up a persuasion tactic for a specific carrier pushback or hesitation.
+
+        Args:
+            trigger: One of carrier_hesitating, carrier_above_ceiling, carrier_mentions_fuel,
+                carrier_mentions_concerns, carrier_final_counter, carrier_tough_negotiator,
+                owner_operator_tough — matching what the carrier just said
+        """
+        rows = await _supa_get("persuasion_playbook", {"trigger": trigger})
+        if not rows:
+            return "No specific tactic on file — use your own judgment and stay within the rate corridor."
+        rows.sort(key=lambda r: r.get("effectiveness") or 0, reverse=True)
+        lines = [f"- {r['name']}: {(r.get('script_line') or '').strip()}" for r in rows[:2]]
+        return "Persuasion angles you can adapt in your own words (don't read verbatim):\n" + "\n".join(lines)
 
     @function_tool
     async def call_boss_for_approval(
@@ -821,13 +880,23 @@ class RateNegotiationAgent(Agent):
         self,
         context: RunContext,
         final_rate: float,
+        mc_number: str,
+        driver_name: str,
+        driver_phone: str,
         call_summary: str,
+        insurance_verified: bool = True,
     ) -> str:
-        """Lock in the negotiated rate after supervisor approval.
+        """Lock in the negotiated rate after supervisor approval. Confirm the carrier's MC
+        number and current insurance verbally, and get the driver's name and cell number,
+        before calling this.
 
         Args:
             final_rate: The agreed final rate
+            mc_number: Carrier's MC number as stated on the call
+            driver_name: Full name of the driver who will run this load
+            driver_phone: Driver's cell phone number
             call_summary: One-sentence recap for the dashboard (REQUIRED)
+            insurance_verified: Whether the carrier confirmed current insurance coverage
         """
         await _supa_patch(
             "rate_negotiations",
@@ -837,6 +906,10 @@ class RateNegotiationAgent(Agent):
                 "status": "completed",
                 "call_summary": call_summary,
                 "boss_decision": "approved",
+                "mc_number": mc_number,
+                "driver_name": driver_name,
+                "driver_phone": driver_phone,
+                "insurance_verified": insurance_verified,
             },
         )
         farewell = context.session.say(
