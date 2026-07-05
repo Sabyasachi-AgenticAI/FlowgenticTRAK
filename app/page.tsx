@@ -806,7 +806,7 @@ function renderRNCarriers(){
     const neg=isDone?rnNegotiations.find((n:any)=>n.carrier_name===c.carrier_name&&(n.status==='completed'||n.status==='failed')):null
     const outcome=neg?.call_summary?`<div class="cell-summary">"${neg.call_summary}"</div>`:(isDone?callStatusChip(neg?.status==='completed'?'completed':'failed'):'')
     return `<div class="table-row rn-cols${isDone&&neg?.status==='completed'?' row-highlight':''}">
-      <div><div class="cell-primary">${c.carrier_name}</div></div>
+      <div><div class="cell-primary">${c.carrier_name}</div>${c.contact_name?`<div class="cell-phone">${c.contact_name}</div>`:''}</div>
       <div class="cell-amount">$${c.avg_rate.toLocaleString()}</div>
       <div class="cell-amount">$${c.last_rate.toLocaleString()}</div>
       <div class="cell-muted">${c.load_count}</div>
@@ -866,7 +866,7 @@ async function searchCarriersForLane(){
 function updateRNDialer(){
   const c=rnCarriers[rnCarrierIdx];if(!c)return
   const dn=el('rnDialerName'),dm=el('rnDialerMeta'),dc=el('rnDialerCurrent'),dt=el('rnDialerTotal'),dnx=el('rnDialerNext'),dti=el('rnDialerTimer'),dtr=el('rnDialerTranscript'),dcard=el('rnDialerCard'),dboss=el('rnBossStatus'),doff=el('rnDialerOffer')
-  if(dn)dn.textContent=c.carrier_name;if(dm)dm.textContent='avg $'+c.avg_rate.toLocaleString()+' · '+c.load_count+' loads'
+  if(dn)dn.textContent=c.carrier_name;if(dm)dm.textContent=(c.contact_name?c.contact_name+' · ':'')+'avg $'+c.avg_rate.toLocaleString()+' · '+c.load_count+' loads'
   if(dc)dc.textContent=String(rnCarrierIdx+1);if(dt)dt.textContent=String(rnCarriers.length)
   const next=rnCarriers[rnCarrierIdx+1];if(dnx)dnx.textContent=next?next.carrier_name:'Sequence Complete'
   if(dti)dti.textContent='0:00';if(dtr)dtr.innerHTML='';if(doff)doff.textContent='';if(dboss){dboss.textContent='';dboss.className='rn-boss-status'}
