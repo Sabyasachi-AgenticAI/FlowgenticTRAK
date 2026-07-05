@@ -761,17 +761,19 @@ function parseLoadRequirement(text: string){
   return {origin,destination,weight,commodity}
 }
 async function fetchCarriersForLane(origin:string,destination:string){
-  const {data}=await db.from('carrier_rate_history').select('carrier_name,rate,load_date')
+  const {data}=await db.from('carrier_rate_history').select('carrier_name,rate,load_date,contact_name')
     .eq('origin',origin).eq('destination',destination).order('load_date',{ascending:false})
   if(!data||!data.length)return[]
-  const map=new Map<string,{rates:number[],dates:string[]}>()
+  const map=new Map<string,{rates:number[],dates:string[],contact:string|null}>()
   data.forEach((r:any)=>{
-    if(!map.has(r.carrier_name))map.set(r.carrier_name,{rates:[],dates:[]})
-    map.get(r.carrier_name)!.rates.push(Number(r.rate));map.get(r.carrier_name)!.dates.push(r.load_date)
+    if(!map.has(r.carrier_name))map.set(r.carrier_name,{rates:[],dates:[],contact:null})
+    const e=map.get(r.carrier_name)!
+    e.rates.push(Number(r.rate));e.dates.push(r.load_date)
+    if(!e.contact&&r.contact_name)e.contact=r.contact_name
   })
-  return Array.from(map.entries()).map(([name,{rates,dates}])=>({
+  return Array.from(map.entries()).map(([name,{rates,dates,contact}])=>({
     carrier_name:name,avg_rate:Math.round(rates.reduce((a,b)=>a+b,0)/rates.length),
-    last_rate:rates[0],load_count:rates.length,last_date:dates[0]
+    last_rate:rates[0],load_count:rates.length,last_date:dates[0],contact_name:contact
   })).sort((a,b)=>a.avg_rate-b.avg_rate)
 }
 function renderRNLaneCorridor(){
@@ -920,6 +922,7 @@ async function rnStartCallForCarrier(carrier:any){
       pickup_time:pickupTime,delivery_time:deliveryTime,detention_terms:detentionTerms,
       quick_pay_pct:quickPayPct,call_list_position:position,call_list_total:rnCarriers.length,
       prior_loads:carrier.load_count||0,last_load_date:carrier.last_date||null,last_rate:carrier.last_rate||null,
+      contact_name:carrier.contact_name||null,
     })
     await thisRoom.localParticipant.setMicrophoneEnabled(true)
     if(typeof thisRoom.registerTextStreamHandler==='function'){

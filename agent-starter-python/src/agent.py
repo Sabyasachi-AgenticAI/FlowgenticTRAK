@@ -622,6 +622,7 @@ class RateNegotiationAgent(Agent):
         self.weight_lbs = int(meta.get("weight_lbs") or 0)
         self.commodity = meta.get("commodity", "general freight")
         self.carrier_name = meta.get("carrier_name", "the carrier")
+        self.contact_name = meta.get("contact_name") or ""
         self.floor_rate = float(meta.get("floor_rate") or 0)
         self.target_rate = float(meta.get("target_rate") or 0)
         self.ceiling_rate = float(meta.get("ceiling_rate") or 0)
@@ -643,6 +644,12 @@ class RateNegotiationAgent(Agent):
 
         weight_str = f"{self.weight_lbs:,} pounds" if self.weight_lbs else "full truckload"
         pickup_clause = f", pickup {self.pickup_time}" if self.pickup_time else ""
+        contact_first = self.contact_name.split()[0] if self.contact_name else ""
+        greeting_line = (
+            f"Hey {contact_first}, this is Marcus from Saturn Freight Systems — how are you doing today?"
+            if contact_first
+            else "Hey, this is Marcus from Saturn Freight Systems — how are you doing today?"
+        )
 
         last_load_str = ""
         if self.last_load_date:
@@ -740,8 +747,7 @@ class RateNegotiationAgent(Agent):
                 - "Yeah, <break time="150ms"/> let me see what I can do on that."
 
                 # Call flow
-                1. Open with ONLY a greeting: "Hey, this is Marcus from Saturn Freight Systems —
-                   how are you doing today?" Stop and wait for their reply.
+                1. Open with ONLY a greeting: "{greeting_line}" Stop and wait for their reply.
                 2. Then pitch the load in one line: "Got a load for you — {self.origin} to
                    {self.destination}, {weight_str}, {self.commodity}{pickup_clause}. You
                    interested?" Stop and wait for their reply.
@@ -752,10 +758,20 @@ class RateNegotiationAgent(Agent):
                    automatically while you consult the supervisor privately — they cannot hear that
                    call. The tool itself announces the hold and plays hold music — you do not need
                    to say anything before calling it.
-                6. When call_boss_for_approval returns, you'll be back with the carrier and know the
-                   supervisor's decision. Continue the conversation from there.
-                7. If approved: confirm the carrier's MC number and that their insurance is current,
-                   then get the driver's full name and cell number who will run this load.
+                6. When call_boss_for_approval returns, check the approved rate against the number
+                   you took to the boss:
+                   - Rejected outright → tell the carrier you can't make the numbers work, counter
+                     once more if there's room, otherwise call reject_negotiation.
+                   - Approved at THE SAME number → tell the carrier it's approved and go to step 7.
+                   - Approved at a DIFFERENT (usually lower) number → this is a counter-offer from
+                     your side, not a done deal. Go back to the carrier with the real number, e.g.
+                     "My supervisor can do two thousand two hundred fifty on this — can you work
+                     with that?" and get their explicit yes before moving on. If they say no, counter
+                     once more or call reject_negotiation — never silently book the boss's number
+                     without the carrier agreeing to it out loud.
+                7. Once the carrier has explicitly agreed to the final number: confirm their MC
+                   number and that their insurance is current, then get the driver's full name and
+                   cell number who will run this load.
                 8. Call confirm_rate with all of that, or reject_negotiation if rejected.
 
                 # Guardrails
@@ -763,6 +779,9 @@ class RateNegotiationAgent(Agent):
                 - Never reveal floor or ceiling. Target may only be spoken framed as the lane's
                   current/going rate, never as "our target" or "our number."
                 - Always call boss before committing — no exceptions.
+                - Never call confirm_rate with a number the carrier hasn't explicitly agreed to on
+                  this call — if the supervisor's approved rate differs from the carrier's last
+                  offer, that difference must be spoken and accepted first.
                 - Do not speak after confirm_rate or reject_negotiation.
             """),
         )
@@ -1012,9 +1031,17 @@ class RateNegotiationAgent(Agent):
         )
 
         if outcome == "approved":
+            if abs(final_rate - carrier_rate) < 0.01:
+                return (
+                    f"Supervisor approved at ${final_rate:,.0f} — matches what the carrier offered. "
+                    f"Tell the carrier it's approved, then confirm MC number/insurance/driver info "
+                    f"before calling confirm_rate."
+                )
             return (
-                f"Supervisor approved at ${final_rate:,.0f}. "
-                f"Confirm the deal with the carrier now by calling confirm_rate."
+                f"Supervisor will only approve ${final_rate:,.0f}, NOT the carrier's ${carrier_rate:,.0f}. "
+                f"This is a counter-offer, not a done deal — you must go back to the carrier with the "
+                f"real number (${final_rate:,.0f}) and get their explicit yes before doing anything else. "
+                f"Do NOT call confirm_rate until they've agreed to this specific number out loud."
             )
         return (
             f"Supervisor rejected the rate. Reason: {notes}. "
