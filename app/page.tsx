@@ -761,8 +761,14 @@ function parseLoadRequirement(text: string){
   return {origin,destination,weight,commodity}
 }
 async function fetchCarriersForLane(origin:string,destination:string){
-  const {data}=await db.from('carrier_rate_history').select('carrier_name,rate,load_date,contact_name')
+  let {data,error}:{data:any[]|null,error:any}=await db.from('carrier_rate_history')
+    .select('carrier_name,rate,load_date,contact_name')
     .eq('origin',origin).eq('destination',destination).order('load_date',{ascending:false})
+  if(error){
+    dbg('[RN] contact_name column missing, falling back: '+error.message)
+    ;({data}=await db.from('carrier_rate_history').select('carrier_name,rate,load_date')
+      .eq('origin',origin).eq('destination',destination).order('load_date',{ascending:false}))
+  }
   if(!data||!data.length)return[]
   const map=new Map<string,{rates:number[],dates:string[],contact:string|null}>()
   data.forEach((r:any)=>{
