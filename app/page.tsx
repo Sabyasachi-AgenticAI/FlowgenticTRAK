@@ -919,6 +919,7 @@ async function rnStartCallForCarrier(carrier:any){
       load_ref:rnLoadRef,pickup_address:pickupAddress,delivery_address:deliveryAddress,
       pickup_time:pickupTime,delivery_time:deliveryTime,detention_terms:detentionTerms,
       quick_pay_pct:quickPayPct,call_list_position:position,call_list_total:rnCarriers.length,
+      prior_loads:carrier.load_count||0,last_load_date:carrier.last_date||null,last_rate:carrier.last_rate||null,
     })
     await thisRoom.localParticipant.setMicrophoneEnabled(true)
     if(typeof thisRoom.registerTextStreamHandler==='function'){

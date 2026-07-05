@@ -36,7 +36,7 @@ SUPA_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
 LIVEKIT_URL = os.getenv("LIVEKIT_URL", "")
 
 VOICE_ARIA = "9626c31c-bec5-4cca-baa8-f8ba9e84c8bc"  # Jacqueline - confident young American female
-VOICE_MARCUS = "c0f43c66-9f21-4034-b485-8f1d3340d759"  # Clarkson - Executive Tone, confident businesslike male
+VOICE_MARCUS = "5fc5c797-12c5-4f2b-ac9b-d4e53c08098f"  # Wyatt - Dependable Dispatcher, friendly American male w/ subtle Southern drawl
 
 
 # ── Supabase REST helpers ─────────────────────────────────────
@@ -189,15 +189,15 @@ class CarrierCheckAgent(Agent):
                 f"a driver-initiated VEHICLE BREAKDOWN alert was received. This is a priority call."
             )
             opening = (
-                f"Ask about their safety first, then the vehicle condition, "
-                f"then whether roadside assistance is needed."
+                "Ask about their safety first, then the vehicle condition, "
+                "then whether roadside assistance is needed."
             )
         else:
             situation = (
                 f"GPS tracking shows the truck has been stationary for {gps_idle_mins} minutes "
                 f"with no movement logged."
             )
-            opening = f"Check their status, confirm current location, and get an updated ETA."
+            opening = "Check their status, confirm current location, and get an updated ETA."
 
         super().__init__(
             instructions=textwrap.dedent(f"""\
@@ -556,6 +556,8 @@ class _BossConsultAgent(Agent):
 
                 # Output rules
                 Brief and direct. One or two sentences per turn. No markdown or symbols.
+                Speak dollar amounts in full words, e.g. "two thousand two hundred dollars" —
+                never read digits individually (never "two two zero zero").
 
                 # Call flow
                 1. Open with ONLY: "Hey, quick one for you." Then state the deal in one sentence
@@ -584,7 +586,10 @@ class _BossConsultAgent(Agent):
         """
         if not self._decision.done():
             self._decision.set_result(("approved", final_rate, notes))
-        farewell = context.session.say("Perfect, thanks — talk soon.", allow_interruptions=False)
+        farewell = context.session.say(
+            f"Perfect — approved at {int(final_rate):,} dollars. Thanks, talk soon.",
+            allow_interruptions=False,
+        )
         await farewell.wait_for_playout()
         return "Approval recorded."
 
@@ -597,7 +602,10 @@ class _BossConsultAgent(Agent):
         """
         if not self._decision.done():
             self._decision.set_result(("rejected", None, reason))
-        farewell = context.session.say("Understood, thanks.", allow_interruptions=False)
+        farewell = context.session.say(
+            "Understood — noted as rejected. Thanks for the call.",
+            allow_interruptions=False,
+        )
         await farewell.wait_for_playout()
         return "Rejection recorded."
 
@@ -617,19 +625,36 @@ class RateNegotiationAgent(Agent):
         self.floor_rate = float(meta.get("floor_rate") or 0)
         self.target_rate = float(meta.get("target_rate") or 0)
         self.ceiling_rate = float(meta.get("ceiling_rate") or 0)
+        self.prior_loads = int(meta.get("prior_loads") or 0)
+        self.last_load_date = meta.get("last_load_date") or ""
         self.boss_called = False
+        self.background_audio: BackgroundAudioPlayer | None = None
 
         load_ref = meta.get("load_ref", "")
         pickup_address = meta.get("pickup_address", "")
         delivery_address = meta.get("delivery_address", "")
-        pickup_time = meta.get("pickup_time", "")
+        self.pickup_time = meta.get("pickup_time", "")
+        pickup_time = self.pickup_time
         delivery_time = meta.get("delivery_time", "")
         detention_terms = meta.get("detention_terms") or "$75/hour after 2 free hours at pickup and delivery"
         quick_pay_pct = meta.get("quick_pay_pct")
         self.call_list_position = meta.get("call_list_position")
         self.call_list_total = meta.get("call_list_total")
 
-        weight_str = f"{self.weight_lbs:,} lbs" if self.weight_lbs else "full truckload"
+        weight_str = f"{self.weight_lbs:,} pounds" if self.weight_lbs else "full truckload"
+        pickup_clause = f", pickup {self.pickup_time}" if self.pickup_time else ""
+
+        last_load_str = ""
+        if self.last_load_date:
+            try:
+                last_load_str = date.fromisoformat(str(self.last_load_date)[:10]).strftime("%B %d")
+            except ValueError:
+                last_load_str = str(self.last_load_date)
+        relationship_clause = ""
+        if self.prior_loads >= 1:
+            trip_word = "load" if self.prior_loads == 1 else "loads"
+            relationship_clause = f" We've worked together before — {self.prior_loads} {trip_word}"
+            relationship_clause += f", most recently {last_load_str}." if last_load_str else "."
 
         load_lines = []
         if load_ref:
@@ -646,6 +671,13 @@ class RateNegotiationAgent(Agent):
             load_lines.append(f"Quick pay available at {quick_pay_pct}% if the carrier asks about payment speed")
         load_block = "\n                ".join(load_lines)
 
+        relationship_block = (
+            f"Prior loads with this carrier: {self.prior_loads}"
+            + (f" (most recent: {last_load_str})" if last_load_str else "")
+            if self.prior_loads >= 1
+            else "No prior loads on file with this carrier — this is a new relationship."
+        )
+
         call_list_line = ""
         if self.call_list_position and self.call_list_total:
             call_list_line = (
@@ -661,17 +693,29 @@ class RateNegotiationAgent(Agent):
                 # Load details
                 {load_block}
 
-                # Rate corridor — CONFIDENTIAL, never reveal these to the carrier
-                Floor (absolute minimum we pay): ${self.floor_rate:,.0f}
-                Target (your goal):              ${self.target_rate:,.0f}
-                Ceiling (max you can authorise): ${self.ceiling_rate:,.0f}
+                # Carrier relationship
+                {relationship_block}
+
+                # Rate corridor
+                Floor (absolute minimum we pay) — CONFIDENTIAL, never reveal: ${self.floor_rate:,.0f}
+                Target (your goal) — may be cited to the carrier as "what we're running on this
+                  lane," see negotiation strategy below:                     ${self.target_rate:,.0f}
+                Ceiling (max you can authorise) — CONFIDENTIAL, never reveal: ${self.ceiling_rate:,.0f}
 
                 # Negotiation strategy
-                - Open by stating the lane and weight only. Never mention floor, target, or ceiling.
+                - Open by stating the lane and weight only. Never mention floor or ceiling.
                 - First ask: "What's your best rate on this?"
+                - If their first number is above target, counter immediately by citing the target
+                  rate as current market data, e.g.: "We're running about ${self.target_rate:,.0f}
+                  on this lane right now — that's a bit rich for us at what you're asking." Frame it
+                  as the lane's going rate, not as a hard internal number.
                 - Carrier AT or BELOW target → it's a good deal; still call call_boss_for_approval before committing.
-                - Carrier BETWEEN target and ceiling → push back once with a counter near target, then call call_boss_for_approval with their firm offer.
-                - Carrier ABOVE ceiling → counter firmly at target. If they won't move below ceiling, call reject_negotiation.
+                - Carrier BETWEEN target and ceiling after your counter → hold near target, use
+                  get_persuasion_tactic if they push further, then call call_boss_for_approval with
+                  their firm offer.
+                - Carrier ABOVE ceiling → hold firmly at target, call get_persuasion_tactic for extra
+                  leverage (e.g. market/DAT rate references). If they won't move below ceiling, call
+                  reject_negotiation.
                 - Never accept a rate on the spot — procedure requires supervisor sign-off every time.
                 - Be confident and direct. You have done hundreds of these calls.
 
@@ -698,22 +742,28 @@ class RateNegotiationAgent(Agent):
                 - "Yeah, <break time="150ms"/> let me see what I can do on that."
 
                 # Call flow
-                1. Open: "Hey, this is Marcus from Saturn Freight — you got capacity available right now?"
-                2. State: "{self.origin} to {self.destination}, {weight_str}, {self.commodity} — what's your best rate?"
-                3. Negotiate and counter until carrier gives a firm number. Use get_persuasion_tactic
+                1. Open with ONLY a greeting: "Hey, this is Marcus from Saturn Freight Systems —
+                   how are you doing today?" Stop and wait for their reply.
+                2. Then pitch the load in one line: "Got a load for you — {self.origin} to
+                   {self.destination}, {weight_str}, {self.commodity}{pickup_clause}.{relationship_clause} You
+                   interested?" Stop and wait for their reply.
+                3. Once they confirm capacity, ask: "What's your best rate on this?"
+                4. Negotiate and counter until carrier gives a firm number. Use get_persuasion_tactic
                    when they push back (see above).
-                4. Call call_boss_for_approval with that number. The carrier is placed on hold
-                   automatically while you consult the supervisor privately — they cannot hear that call.
-                   Say something like "Let me check on that — one moment" right before calling it.
-                5. When call_boss_for_approval returns, you'll be back with the carrier and know the
+                5. Call call_boss_for_approval with that number. The carrier is placed on hold
+                   automatically while you consult the supervisor privately — they cannot hear that
+                   call. The tool itself announces the hold and plays hold music — you do not need
+                   to say anything before calling it.
+                6. When call_boss_for_approval returns, you'll be back with the carrier and know the
                    supervisor's decision. Continue the conversation from there.
-                6. If approved: confirm the carrier's MC number and that their insurance is current,
+                7. If approved: confirm the carrier's MC number and that their insurance is current,
                    then get the driver's full name and cell number who will run this load.
-                7. Call confirm_rate with all of that, or reject_negotiation if rejected.
+                8. Call confirm_rate with all of that, or reject_negotiation if rejected.
 
                 # Guardrails
                 - One question per turn.
-                - Never reveal floor / target / ceiling.
+                - Never reveal floor or ceiling. Target may only be spoken framed as the lane's
+                  current/going rate, never as "our target" or "our number."
                 - Always call boss before committing — no exceptions.
                 - Do not speak after confirm_rate or reject_negotiation.
             """),
@@ -740,6 +790,12 @@ class RateNegotiationAgent(Agent):
         rows = await _supa_get("persuasion_playbook", {"trigger": trigger})
         if not rows:
             return "No specific tactic on file — use your own judgment and stay within the rate corridor."
+
+        def _eligible(row: dict) -> bool:
+            min_prior = (row.get("conditions") or {}).get("prior_loads_min")
+            return min_prior is None or self.prior_loads >= min_prior
+
+        rows = [r for r in rows if _eligible(r)] or rows
         rows.sort(key=lambda r: r.get("effectiveness") or 0, reverse=True)
         top = rows[0]
         await _supa_patch(
@@ -747,7 +803,10 @@ class RateNegotiationAgent(Agent):
             {"id": self.negotiation_id},
             {"last_tactic_used": top.get("name"), "last_tactic_effectiveness": top.get("effectiveness")},
         )
-        lines = [f"- {r['name']}: {(r.get('script_line') or '').strip()}" for r in rows[:2]]
+        lines = [
+            f"- {r['name']}: {(r.get('script_line') or '').strip().replace('{{prior_loads}}', str(self.prior_loads))}"
+            for r in rows[:2]
+        ]
         return "Persuasion angles you can adapt in your own words (don't read verbatim):\n" + "\n".join(lines)
 
     @function_tool
@@ -773,15 +832,59 @@ class RateNegotiationAgent(Agent):
         sip_trunk_id = os.getenv("SIP_OUTBOUND_TRUNK_ID", "")
         boss_phone = os.getenv("BOSS_PHONE", "")
 
+        # If the carrier hangs up while the boss consult is in flight, we must not let
+        # the real phone call to the supervisor keep running in the background for up
+        # to the full 180s timeout — hang it up immediately instead. "disconnected" only
+        # fires when OUR OWN connection to the room closes; the carrier leaving fires
+        # "participant_disconnected" (the same event close_on_disconnect reacts to).
+        carrier_gone = asyncio.Event()
+
+        def _on_carrier_room_disconnected(*_args: object) -> None:
+            carrier_gone.set()
+
+        job_ctx.room.on("participant_disconnected", _on_carrier_room_disconnected)
+
         await _supa_patch(
             "rate_negotiations",
             {"id": self.negotiation_id},
             {"carrier_offer": carrier_rate, "boss_call_status": "calling", "status": "pending_approval"},
         )
 
-        # Hold the carrier — they can't hear or be heard during the supervisor consult.
-        context.session.input.set_audio_enabled(False)
-        context.session.output.set_audio_enabled(False)
+        async def _safe_say(text: str, *, allow_interruptions: bool) -> None:
+            # The carrier may hang up (closing the session) at any point during the
+            # consult — session.say() raises RuntimeError once that teardown has
+            # started. That's expected here, not a bug, so swallow it.
+            try:
+                handle = context.session.say(text, allow_interruptions=allow_interruptions)
+                await handle.wait_for_playout()
+            except RuntimeError:
+                pass
+
+        # Announce the hold, then place the carrier on hold with music — they can't hear
+        # or be heard during the supervisor consult.
+        await _safe_say(
+            "Let me check with my boss on that — hold on for me for just a moment.",
+            allow_interruptions=False,
+        )
+        with contextlib.suppress(RuntimeError):
+            context.session.input.set_audio_enabled(False)
+            context.session.output.set_audio_enabled(False)
+        hold_music = (
+            self.background_audio.play(
+                AudioConfig(BuiltinAudioClip.HOLD_MUSIC, fade_in=0.3, fade_out=0.4),
+                loop=True,
+            )
+            if self.background_audio is not None
+            else None
+        )
+
+        async def _end_hold() -> None:
+            if hold_music is not None:
+                hold_music.stop()
+            with contextlib.suppress(RuntimeError):
+                context.session.input.set_audio_enabled(True)
+                context.session.output.set_audio_enabled(True)
+            await _safe_say("Thanks for holding —", allow_interruptions=True)
 
         consult_room_name = f"{job_ctx.room.name}-consult"
         consult_room = rtc.Room()
@@ -815,24 +918,46 @@ class RateNegotiationAgent(Agent):
             )
             deal_summary = (
                 f"{self.carrier_name} is quoting ${carrier_rate:,.0f} for {self.origin} to "
-                f"{self.destination}, {self.weight_lbs:,} lbs {self.commodity}. {justification}."
+                f"{self.destination}, {self.weight_lbs:,} pounds {self.commodity}. {justification}."
             )
             await consult_session.start(
                 agent=_BossConsultAgent(deal_summary, decision),
                 room=consult_room,
             )
 
-            await job_ctx.api.sip.create_sip_participant(
-                api.CreateSIPParticipantRequest(
-                    sip_trunk_id=sip_trunk_id,
-                    sip_call_to=boss_phone,
-                    room_name=consult_room_name,
-                    participant_identity="boss-approval",
-                    participant_name="Supervisor",
-                    play_dialtone=True,
-                    wait_until_answered=True,
+            dial_task = asyncio.ensure_future(
+                job_ctx.api.sip.create_sip_participant(
+                    api.CreateSIPParticipantRequest(
+                        sip_trunk_id=sip_trunk_id,
+                        sip_call_to=boss_phone,
+                        room_name=consult_room_name,
+                        participant_identity="boss-approval",
+                        participant_name="Supervisor",
+                        play_dialtone=True,
+                        wait_until_answered=True,
+                    )
                 )
             )
+            ringing_carrier_gone_task = asyncio.ensure_future(carrier_gone.wait())
+            await asyncio.wait(
+                [dial_task, ringing_carrier_gone_task], return_when=asyncio.FIRST_COMPLETED
+            )
+
+            if carrier_gone.is_set():
+                dial_task.cancel()
+                with contextlib.suppress(Exception):
+                    await dial_task
+                logger.info("Carrier hung up while the supervisor's phone was still ringing.")
+                await _supa_patch(
+                    "rate_negotiations",
+                    {"id": self.negotiation_id},
+                    {"boss_call_status": "aborted"},
+                )
+                return "Carrier disconnected before the supervisor could be reached."
+
+            ringing_carrier_gone_task.cancel()
+            await dial_task  # propagate any dial failure (busy, forbidden, etc.)
+
             await _supa_patch(
                 "rate_negotiations",
                 {"id": self.negotiation_id},
@@ -842,7 +967,26 @@ class RateNegotiationAgent(Agent):
             # Supervisor has picked up — safe to greet them now.
             await consult_session.generate_reply()
 
-            outcome, final_rate, notes = await asyncio.wait_for(decision, timeout=180)
+            carrier_gone_task = asyncio.ensure_future(carrier_gone.wait())
+            done, pending = await asyncio.wait(
+                [decision, carrier_gone_task], timeout=180, return_when=asyncio.FIRST_COMPLETED
+            )
+            for p in pending:
+                p.cancel()
+
+            if carrier_gone.is_set():
+                logger.info("Carrier hung up mid-consult — hanging up the supervisor call too.")
+                await _supa_patch(
+                    "rate_negotiations",
+                    {"id": self.negotiation_id},
+                    {"boss_call_status": "aborted"},
+                )
+                return "Carrier disconnected before the supervisor responded. Nothing further to do."
+
+            if decision not in done:
+                raise TimeoutError("Boss consult timed out waiting for a decision.")
+
+            outcome, final_rate, notes = decision.result()
         except Exception as e:
             logger.error("Boss consult failed: %s", e)
             await _supa_patch(
@@ -850,10 +994,10 @@ class RateNegotiationAgent(Agent):
                 {"id": self.negotiation_id},
                 {"boss_call_status": "failed"},
             )
-            context.session.input.set_audio_enabled(True)
-            context.session.output.set_audio_enabled(True)
+            await _end_hold()
             return "Could not reach supervisor. Use your best judgment and proceed."
         finally:
+            job_ctx.room.off("participant_disconnected", _on_carrier_room_disconnected)
             if consult_session is not None:
                 await consult_session.aclose()
             await consult_room.disconnect()
@@ -861,8 +1005,7 @@ class RateNegotiationAgent(Agent):
                 await job_ctx.api.room.delete_room(api.DeleteRoomRequest(room=consult_room_name))
 
         # Resume the carrier call.
-        context.session.input.set_audio_enabled(True)
-        context.session.output.set_audio_enabled(True)
+        await _end_hold()
 
         await _supa_patch(
             "rate_negotiations",
@@ -919,9 +1062,9 @@ class RateNegotiationAgent(Agent):
             },
         )
         farewell = context.session.say(
-            f"Perfect — we are locked in at {int(final_rate):,} dollars. "
-            f'<break time="300ms"/> I will get the rate confirmation over to you shortly. '
-            f'<break time="300ms"/> Thanks for working with us. <break time="400ms"/> Goodbye!',
+            f"Perfect — we're locked in at {int(final_rate):,} dollars. "
+            f"I'll get the rate confirmation over to you shortly. "
+            f"Thanks for working with us — talk soon. Goodbye!",
             allow_interruptions=False,
         )
         await farewell.wait_for_playout()
@@ -953,8 +1096,8 @@ class RateNegotiationAgent(Agent):
             },
         )
         farewell = context.session.say(
-            f"I appreciate your time — we are not able to make the numbers work on this one. "
-            f'<break time="300ms"/> We will keep you in mind for future loads. <break time="400ms"/> Goodbye!',
+            "I appreciate your time — we're not able to make the numbers work on this one. "
+            "We'll keep you in mind for future loads. Take care, goodbye!",
             allow_interruptions=False,
         )
         await farewell.wait_for_playout()
@@ -1055,6 +1198,8 @@ async def my_agent(ctx: JobContext):
             AudioConfig(BuiltinAudioClip.KEYBOARD_TYPING2, volume=0.4, probability=0.3),
         ],
     )
+    if isinstance(agent, RateNegotiationAgent):
+        agent.background_audio = background_audio
 
     session_task = asyncio.create_task(
         session.start(
