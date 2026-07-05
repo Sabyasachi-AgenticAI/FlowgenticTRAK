@@ -915,7 +915,11 @@ async function rnStartCallForCarrier(carrier:any){
       if(rnAutoRunning&&!_rnFeedRefs.has(rnCurrentNegId!)){_rnFeedRefs.add(rnCurrentNegId!);rnStartCountdownToNext()}
     })
     thisRoom.on(LK.RoomEvent.TrackSubscribed,(track:any,_pub:any,participant:any)=>{
-      if(track.kind===LK.Track.Kind.Audio){const ae=track.attach();ae.dataset.lkParticipant='rn-'+participant.sid;document.body.appendChild(ae)}
+      if(track.kind===LK.Track.Kind.Audio){
+        const ae=track.attach();ae.dataset.lkParticipant='rn-'+participant.sid;document.body.appendChild(ae)
+        dbg('[RN] Audio attached — '+participant.identity)
+        ae.play?.().catch((err:any)=>dbg('[RN] Playback blocked: '+err.message))
+      }
     })
     thisRoom.on(LK.RoomEvent.TrackUnsubscribed,(track:any)=>track.detach().forEach((e:any)=>e.remove()))
     await thisRoom.connect(LK_WS_URL,token)
