@@ -650,11 +650,6 @@ class RateNegotiationAgent(Agent):
                 last_load_str = date.fromisoformat(str(self.last_load_date)[:10]).strftime("%B %d")
             except ValueError:
                 last_load_str = str(self.last_load_date)
-        relationship_clause = ""
-        if self.prior_loads >= 1:
-            trip_word = "load" if self.prior_loads == 1 else "loads"
-            relationship_clause = f" We've worked together before — {self.prior_loads} {trip_word}"
-            relationship_clause += f", most recently {last_load_str}." if last_load_str else "."
 
         load_lines = []
         if load_ref:
@@ -695,6 +690,9 @@ class RateNegotiationAgent(Agent):
 
                 # Carrier relationship
                 {relationship_block}
+                Do NOT mention this in your opening pitch — it reads like reciting a stat sheet.
+                Only bring it up naturally later, e.g. via get_persuasion_tactic if the carrier
+                hesitates, or as a passing rapport comment once they've confirmed interest.
 
                 # Rate corridor
                 Floor (absolute minimum we pay) — CONFIDENTIAL, never reveal: ${self.floor_rate:,.0f}
@@ -745,7 +743,7 @@ class RateNegotiationAgent(Agent):
                 1. Open with ONLY a greeting: "Hey, this is Marcus from Saturn Freight Systems —
                    how are you doing today?" Stop and wait for their reply.
                 2. Then pitch the load in one line: "Got a load for you — {self.origin} to
-                   {self.destination}, {weight_str}, {self.commodity}{pickup_clause}.{relationship_clause} You
+                   {self.destination}, {weight_str}, {self.commodity}{pickup_clause}. You
                    interested?" Stop and wait for their reply.
                 3. Once they confirm capacity, ask: "What's your best rate on this?"
                 4. Negotiate and counter until carrier gives a firm number. Use get_persuasion_tactic
