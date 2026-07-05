@@ -544,8 +544,10 @@ class _BossConsultAgent(Agent):
     """Runs in a private consult room with the supervisor only.
     The carrier is on hold in a different room and never hears this."""
 
-    def __init__(self, deal_summary: str, decision: asyncio.Future) -> None:
+    def __init__(self, deal_summary: str, decision: asyncio.Future, boss_name: str = "") -> None:
         self._decision = decision
+        boss_first = boss_name.split()[0] if boss_name else ""
+        greeting = f"Hey {boss_first}," if boss_first else "Hey,"
         super().__init__(
             instructions=textwrap.dedent(f"""\
                 You are Marcus, calling your supervisor privately to get sign-off on a carrier
@@ -560,8 +562,10 @@ class _BossConsultAgent(Agent):
                 never read digits individually (never "two two zero zero").
 
                 # Call flow
-                1. Open with ONLY: "Hey, quick one for you." Then state the deal in one sentence
-                   and ask: "Do I have your approval at this rate?"
+                1. Open with ONE natural turn: "{greeting} <break time="200ms"/> got a deal on
+                   [lane] for [rate] — what do you say, shall we go ahead?" Pull the lane and
+                   rate from the deal above and say them in your own words — just the lane and
+                   the number, not the full paragraph verbatim.
                 2. If they approve — at the carrier's number or a different number they'll
                    accept — call approve_rate with that final number.
                 3. If they reject outright, call reject_rate with their reason.
@@ -881,6 +885,7 @@ class RateNegotiationAgent(Agent):
         job_ctx = get_job_context()
         sip_trunk_id = os.getenv("SIP_OUTBOUND_TRUNK_ID", "")
         boss_phone = os.getenv("BOSS_PHONE", "")
+        boss_name = os.getenv("BOSS_NAME", "")
 
         # If the carrier hangs up while the boss consult is in flight, we must not let
         # the real phone call to the supervisor keep running in the background for up
@@ -971,7 +976,7 @@ class RateNegotiationAgent(Agent):
                 f"{self.destination}, {self.weight_lbs:,} pounds {self.commodity}. {justification}."
             )
             await consult_session.start(
-                agent=_BossConsultAgent(deal_summary, decision),
+                agent=_BossConsultAgent(deal_summary, decision, boss_name),
                 room=consult_room,
             )
 
