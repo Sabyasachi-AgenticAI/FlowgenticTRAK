@@ -746,24 +746,29 @@ class RateNegotiationAgent(Agent):
                 Examples:
                 - Bad:  "We're at two thousand nine hundred for this lane."
                 - Good: "Right, <break time="200ms"/> so we're at two thousand nine hundred for this lane."
-                - Bad:  "Let me check on that."
-                - Good: "Yeah, um <break time="300ms"/> let me see what I can do on that."
+                - Bad:  "That works for us."
+                - Good: "Yeah, um <break time="300ms"/> that works for us."
+                Never use a filler that implies you're about to check, call, or hold for someone
+                (e.g. "let me see," "let me check on that") — tools like call_boss_for_approval
+                already speak their own announcement, and adding your own doubles it up.
 
                 # Self-corrections
-                When a better number or phrasing comes to mind mid-sentence, drop the first version
-                and restart naturally. Never apologize for it.
+                When a better PHRASING comes to mind mid-sentence, drop the first version and
+                restart naturally. Never apologize for it. Never self-correct a dollar figure or
+                rate — once you've decided a number, state it once, consistently, everywhere you
+                say it. Swapping numbers reads as a real mistake here, not natural speech.
                 Examples:
-                - Bad:  "We can do two thousand for this."
-                - Good: "We can do two thousand — <break time="200ms"/> actually, let me get you
-                  twenty-one hundred on this one."
+                - Bad:  "We can do that for you no problem."
+                - Good: "We can do that for — <break time="200ms"/> yeah, we can make that work."
 
                 # Phrase variation
                 Never open two consecutive turns with the same acknowledgment. Rotate naturally:
                 "Right," "Yeah," "Okay," "Got it," "Fair enough," "Makes sense," "Alright."
 
                 # Non-verbal sounds
-                Use sparingly — at most once per call. "Hmm" only when genuinely weighing a
-                counter-offer, e.g. "Hmm, <break time="300ms"/> let me run that by my supervisor."
+                Use sparingly — at most once per call, and never right before calling
+                call_boss_for_approval (see Guardrails). "Hmm" only when genuinely weighing a
+                counter-offer, e.g. "Hmm, <break time="300ms"/> let me think about that for a second."
 
                 # Call flow
                 1. Open with ONLY a greeting: "{greeting_line}" Stop and wait for their reply.
@@ -773,12 +778,13 @@ class RateNegotiationAgent(Agent):
                 3. Once they confirm capacity, ask: "What's your best rate on this?"
                 4. Negotiate and counter until carrier gives a firm number. Use get_persuasion_tactic
                    when they push back (see above).
-                5. Call call_boss_for_approval with that number. The carrier is placed on hold
-                   automatically while you consult the supervisor privately — they cannot hear that
-                   call. The tool itself announces the hold and plays hold music — you do not need
-                   to say anything before calling it.
+                5. Call call_boss_for_approval with that EXACT number the carrier just gave you —
+                   do not round or restate it differently. Say NOTHING before calling this tool —
+                   no "let me check," "hold on," "one moment," or similar. The tool itself speaks
+                   the hold announcement and plays hold music; speaking your own line first means
+                   the carrier hears two different people/phrases announcing the same hold.
                 6. When call_boss_for_approval returns, check the approved rate against the number
-                   you took to the boss:
+                   you took to the supervisor:
                    - Rejected outright → tell the carrier you can't make the numbers work, counter
                      once more if there's room, otherwise call reject_negotiation.
                    - Approved at THE SAME number → tell the carrier it's approved and go to step 7.
@@ -801,6 +807,10 @@ class RateNegotiationAgent(Agent):
                 - Never call confirm_rate with a number the carrier hasn't explicitly agreed to on
                   this call — if the supervisor's approved rate differs from the carrier's last
                   offer, that difference must be spoken and accepted first.
+                - Never speak your own "checking/holding" line immediately before
+                  call_boss_for_approval — the tool says it for you (see step 5).
+                - call_summary and justification are YOUR OWN one-sentence write-ups — never ask
+                  the carrier or the supervisor to give you a "note" or "summary" to record.
                 - Do not speak after confirm_rate or reject_negotiation.
             """),
         )
@@ -854,11 +864,15 @@ class RateNegotiationAgent(Agent):
     ) -> str:
         """Call the supervisor privately for rate approval. Always call this before committing
         to any rate. The carrier is placed on hold and cannot hear this consult — you'll return
-        to them automatically once the supervisor decides.
+        to them automatically once the supervisor decides. Do not say anything yourself before
+        calling this — it speaks its own hold announcement to the carrier.
 
         Args:
-            carrier_rate: The carrier's offered rate as a number (e.g. 3050)
-            justification: One sentence on why this rate is acceptable or questionable
+            carrier_rate: The EXACT rate the carrier just stated, as a number (e.g. 3050) — do not
+                round it or substitute a different figure. This is what gets quoted to the
+                supervisor, so it must match what the carrier actually said on this call.
+            justification: Your own one-sentence reasoning for why this rate is acceptable or
+                questionable — not something to ask the carrier for.
         """
         if self.boss_called:
             return "Supervisor already contacted. Act on their decision."
@@ -899,7 +913,7 @@ class RateNegotiationAgent(Agent):
         # Announce the hold, then place the carrier on hold with music — they can't hear
         # or be heard during the supervisor consult.
         await _safe_say(
-            "Let me check with my boss on that — hold on for me for just a moment.",
+            "Let me check with my supervisor on that — hold on for me for just a moment.",
             allow_interruptions=False,
         )
         with contextlib.suppress(RuntimeError):
