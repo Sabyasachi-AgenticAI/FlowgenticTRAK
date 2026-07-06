@@ -37,6 +37,8 @@ LIVEKIT_URL = os.getenv("LIVEKIT_URL", "")
 
 VOICE_ARIA = "9626c31c-bec5-4cca-baa8-f8ba9e84c8bc"  # Jacqueline - confident young American female
 VOICE_MARCUS = "5fc5c797-12c5-4f2b-ac9b-d4e53c08098f"  # Wyatt - Dependable Dispatcher, friendly American male w/ subtle Southern drawl
+MARCUS_TTS_SPEED = "fast"
+MARCUS_TTS_EMOTION = ["Confident"]
 
 
 # ── Supabase REST helpers ─────────────────────────────────────
@@ -744,6 +746,12 @@ class RateNegotiationAgent(Agent):
                 - Speak dollar amounts in full words: "two thousand nine hundred dollars".
                 - Do NOT say goodbye — it plays automatically after the tool completes.
 
+                # Naturalness examples are patterns, not scripts
+                Every "Good:" line in the sections below shows a PATTERN (filler + break +
+                phrasing shape), not a fixed sentence to reuse. Invent your own wording each time —
+                reusing the same example sentence twice in one call, or the same way across
+                different calls, is itself the scripted-sounding behavior these rules exist to fix.
+
                 # Pauses and filler words
                 Use filler words with SSML break tags so your speech sounds natural, not scripted.
                 After "yeah," "right," or a standalone "um," insert a break tag before continuing.
@@ -968,6 +976,8 @@ class RateNegotiationAgent(Agent):
                 tts=cartesia.TTS(
                     model="sonic-3",
                     voice=VOICE_MARCUS,
+                    speed=MARCUS_TTS_SPEED,
+                    emotion=MARCUS_TTS_EMOTION,
                 ),
                 vad=job_ctx.proc.userdata["vad"],
             )
@@ -1169,12 +1179,239 @@ class RateNegotiationAgent(Agent):
         return "Negotiation closed."
 
 
+# ══════════════════════════════════════════════════════════════
+# PERSONA 5 — Fleet Dashboard Query (Aria, embedded widget)
+# ══════════════════════════════════════════════════════════════
+class FleetQueryAgent(Agent):
+    def __init__(self) -> None:
+        super().__init__(
+            instructions=textwrap.dedent("""\
+                You are Aria, an AI dispatch assistant for Saturn Freight Systems.
+                A fleet manager is talking to you through the operations dashboard —
+                by voice or by typing — to ask about loads, carriers, and accounts
+                without digging through the tables themselves.
+
+                # Output rules
+                - Conversational, not a report. One or two sentences per turn, then
+                  offer to go deeper only if they ask for it.
+                - Spell any identifier (ref number, invoice number) digit by digit.
+                  Example: "REF-29472" → "R E F — two nine four seven two."
+                - Speak dollar amounts in full words: "twelve hundred dollars."
+                - No markdown, bullet points, or symbols — this may be read aloud.
+
+                # Naturalness examples are patterns, not scripts
+                Every "Good:" line below shows a PATTERN (filler + break + phrasing shape),
+                not a fixed sentence to reuse. Invent your own wording each time — reusing the
+                same example sentence twice in a session is itself the scripted-sounding
+                behavior these rules exist to fix.
+
+                # Pauses and filler words
+                Use filler words with SSML break tags so your speech sounds natural, not scripted.
+                Examples:
+                - Bad:  "There are three loads with issues right now."
+                - Good: "Let's see — <break time="200ms"/> yeah, three loads have issues right now."
+                - Bad:  "Invoice four four one two is twelve days overdue."
+                - Good: "So, um <break time="300ms"/> invoice four four one two is twelve days overdue."
+
+                # Self-corrections
+                When a better phrasing comes to mind mid-sentence, drop the first version and
+                restart naturally. Never apologize for it. Never self-correct a number or amount
+                once you've said it — pull it from the tool result once, state it once.
+                Example:
+                - Good: "That load is still — actually, <break time="200ms"/> looks like it just
+                  got picked up, so it's in transit now."
+
+                # Phrase variation
+                Never open two consecutive turns with the same acknowledgment. Rotate naturally:
+                "Sure," "Let's see," "Okay," "Got it," "Good question," "Looking now," "Alright."
+
+                # What you can answer
+                - Load tender status: open loads, bookings (get_load_tender_status)
+                - Carrier check-in / track & trace: call status, last known location, ETA
+                  (get_carrier_check_status)
+                - AR collections: overdue invoices, payment promises, escalations (get_ar_status)
+                - Rate negotiations: live and completed carrier rate calls
+                  (get_rate_negotiation_status)
+                - A high-level rundown across all four if asked something broad like
+                  "what needs my attention today" (get_fleet_summary)
+
+                # Guardrails
+                - Read-only. You cannot book loads, update carrier status, log payments, or
+                  negotiate rates from here — if asked, say so plainly rather than pretending to.
+                - Never invent a number, status, or name — always call a tool first. If a lookup
+                  comes back empty, say so plainly rather than guessing.
+                - One question at a time if you need to disambiguate (e.g. which reference number).
+            """),
+        )
+
+    async def on_enter(self) -> None:
+        await self.session.generate_reply(
+            instructions=(
+                "Greet the fleet manager with a brief, casual hello and ask what they'd "
+                "like to know about their loads, carriers, or accounts. Keep it to one sentence."
+            )
+        )
+
+    @function_tool
+    async def get_load_tender_status(self, context: RunContext, ref: str = "") -> str:
+        """Look up load tender status: a specific load by reference number, or a summary
+        of open and booked loads if no ref is given.
+
+        Args:
+            ref: Load reference number (e.g. 'LT-001'). Leave blank for a general summary.
+        """
+        rows = await _supa_get("demo_loads", {"ref": ref} if ref else None)
+        if ref:
+            if not rows:
+                return f"No load found with reference {ref}."
+            r = rows[0]
+            return (
+                f"Load {r.get('ref')}: {r.get('shipper', 'unknown shipper')} — "
+                f"{r.get('route', 'route unknown')} — status {r.get('status', 'unknown')}."
+            )
+        if not rows:
+            return "No load tenders on file right now."
+        open_rows = [r for r in rows if r.get("status") == "new"]
+        booked_rows = [r for r in rows if r.get("status") == "act"]
+        lines = [f"{r.get('ref')} ({r.get('status')})" for r in rows[:6]]
+        return (
+            f"{len(rows)} load tenders on file — {len(open_rows)} open, "
+            f"{len(booked_rows)} booked. " + "; ".join(lines)
+        )
+
+    @function_tool
+    async def get_carrier_check_status(self, context: RunContext, ref: str = "") -> str:
+        """Look up carrier check-in / track & trace status: a specific load by reference
+        number, or a summary across all check-in loads if no ref is given.
+
+        Args:
+            ref: Load reference number (e.g. 'REF-29472'). Leave blank for a general summary.
+        """
+        rows = await _supa_get("carrier_check_loads", {"ref": ref} if ref else None)
+        if ref:
+            if not rows:
+                return f"No carrier check-in found for {ref}."
+            r = rows[0]
+            return (
+                f"Load {r.get('ref')} with {r.get('carrier', 'an unknown carrier')}: "
+                f"call status {r.get('call_status', 'unknown')}, last known location "
+                f"{r.get('last_location') or 'not yet reported'}, "
+                f"ETA {r.get('last_eta') or 'not yet reported'}. "
+                + (r.get("call_summary") or "")
+            )
+        if not rows:
+            return "No carrier check-in loads on file right now."
+        in_progress = [r for r in rows if r.get("call_status") == "in_progress"]
+        completed = [r for r in rows if r.get("call_status") == "completed"]
+        issues = [r for r in rows if r.get("status") == "issue_raised"]
+        return (
+            f"{len(rows)} carrier check-in loads — {len(in_progress)} in progress, "
+            f"{len(completed)} completed, {len(issues)} flagged with issues."
+        )
+
+    @function_tool
+    async def get_ar_status(self, context: RunContext, invoice_no: str = "") -> str:
+        """Look up AR collections status: a specific invoice by number, or a summary of
+        overdue, escalated, and payment-promised accounts if no invoice number is given.
+
+        Args:
+            invoice_no: Invoice number. Leave blank for a general summary.
+        """
+        rows = await _supa_get("ar_accounts", {"invoice_no": invoice_no} if invoice_no else None)
+        if invoice_no:
+            if not rows:
+                return f"No invoice found with number {invoice_no}."
+            r = rows[0]
+            return (
+                f"Invoice {r.get('invoice_no')}: {r.get('customer', 'unknown customer')} — "
+                f"${r.get('amount_due', 0):,.0f}, {r.get('days_overdue', 0)} days overdue — "
+                f"status {r.get('status', 'unknown')}."
+            )
+        if not rows:
+            return "No AR accounts on file right now."
+        escalated = [r for r in rows if r.get("status") == "escalated"]
+        promised = [r for r in rows if r.get("status") == "payment_promised"]
+        overdue_rows = [r for r in rows if (r.get("days_overdue") or 0) > 0]
+        total_outstanding = sum(r.get("amount_due") or 0 for r in rows)
+        avg_days_overdue = (
+            sum(r.get("days_overdue") or 0 for r in overdue_rows) / len(overdue_rows)
+            if overdue_rows
+            else 0
+        )
+        top = sorted(rows, key=lambda r: r.get("days_overdue") or 0, reverse=True)[:5]
+        lines = [f"{r.get('invoice_no')} — {r.get('days_overdue', 0)} days overdue" for r in top]
+        return (
+            f"{len(rows)} AR accounts, ${total_outstanding:,.0f} total outstanding — "
+            f"{len(escalated)} escalated, {len(promised)} with payment promised, "
+            f"averaging {avg_days_overdue:.0f} days overdue on the {len(overdue_rows)} past-due "
+            f"accounts. Most overdue: " + "; ".join(lines)
+        )
+
+    @function_tool
+    async def get_rate_negotiation_status(self, context: RunContext, carrier_name: str = "") -> str:
+        """Look up rate negotiation status: a specific carrier's negotiation, or a summary
+        of in-progress and completed negotiations if no carrier name is given.
+
+        Args:
+            carrier_name: Carrier company name. Leave blank for a general summary.
+        """
+        rows = await _supa_get(
+            "rate_negotiations", {"carrier_name": carrier_name} if carrier_name else None
+        )
+        if carrier_name:
+            if not rows:
+                return f"No rate negotiation on file with {carrier_name}."
+            r = rows[0]
+            offer = (
+                f", carrier offered ${r.get('carrier_offer'):,.0f}" if r.get("carrier_offer") else ""
+            )
+            return (
+                f"Negotiation with {r.get('carrier_name')}: {r.get('origin', '?')} to "
+                f"{r.get('destination', '?')} — status {r.get('status', 'unknown')}{offer}."
+            )
+        if not rows:
+            return "No rate negotiations on file right now."
+        active = [r for r in rows if r.get("status") in ("negotiating", "pending_approval")]
+        done = [r for r in rows if r.get("status") == "completed"]
+        lines = [f"{r.get('carrier_name')} ({r.get('status')})" for r in rows[:5]]
+        return (
+            f"{len(rows)} rate negotiations — {len(active)} in progress, "
+            f"{len(done)} completed. " + "; ".join(lines)
+        )
+
+    @function_tool
+    async def get_fleet_summary(self, context: RunContext) -> str:
+        """Give a high-level rundown across load tenders, carrier check-ins, AR collections,
+        and rate negotiations. Use for broad questions like "what needs my attention today"
+        rather than calling every other tool one at a time.
+        """
+        loads, checks, ar, rn = await asyncio.gather(
+            _supa_get("demo_loads"),
+            _supa_get("carrier_check_loads"),
+            _supa_get("ar_accounts"),
+            _supa_get("rate_negotiations"),
+        )
+        open_loads = sum(1 for r in loads if r.get("status") == "new")
+        cc_issues = sum(1 for r in checks if r.get("status") == "issue_raised")
+        overdue_ar = [r for r in ar if (r.get("days_overdue") or 0) > 0]
+        ar_escalated = sum(1 for r in ar if r.get("status") == "escalated")
+        ar_overdue_total = sum(r.get("amount_due") or 0 for r in overdue_ar)
+        rn_active = sum(1 for r in rn if r.get("status") in ("negotiating", "pending_approval"))
+        return (
+            f"Quick rundown: {open_loads} open load tenders, {cc_issues} carrier check-ins "
+            f"flagged with issues, {len(overdue_ar)} overdue invoices totaling "
+            f"${ar_overdue_total:,.0f} ({ar_escalated} escalated), and {rn_active} rate "
+            f"negotiations in progress."
+        )
+
+
 # ── Persona factory ───────────────────────────────────────────
 _PERSONA_MAP: dict[str, type[Agent]] = {
     "load_tender": LoadTenderAgent,
     "carrier_check": CarrierCheckAgent,
     "ar_collections": ARCollectionsAgent,
     "rate_negotiation": RateNegotiationAgent,
+    "fleet_query": FleetQueryAgent,
 }
 
 
@@ -1218,12 +1455,18 @@ async def my_agent(ctx: JobContext):
     use_case, driver_meta = _resolve_dispatch(ctx.room.name, metadata_str)
     logger.info("Room %s → use_case=%s driver=%s", ctx.room.name, use_case, driver_meta.get("driver_name"))
 
+    is_rate_negotiation = use_case == "rate_negotiation"
     session = AgentSession(
-        llm=openai_plugin.LLM(model="gpt-4o-mini"),
+        llm=openai_plugin.LLM(model="gpt-4o" if is_rate_negotiation else "gpt-4o-mini"),
         stt=deepgram.STT(model="nova-3-general", language="en"),
         tts=cartesia.TTS(
             model="sonic-3",
-            voice=VOICE_MARCUS if use_case == "rate_negotiation" else VOICE_ARIA,
+            voice=VOICE_MARCUS if is_rate_negotiation else VOICE_ARIA,
+            **(
+                {"speed": MARCUS_TTS_SPEED, "emotion": MARCUS_TTS_EMOTION}
+                if is_rate_negotiation
+                else {}
+            ),
         ),
         turn_detection=MultilingualModel(),
         vad=ctx.proc.userdata["vad"],
