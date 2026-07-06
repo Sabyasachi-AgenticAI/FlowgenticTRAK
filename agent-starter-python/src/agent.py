@@ -90,6 +90,7 @@ class LoadTenderAgent(Agent):
                 - Keep replies to one or two sentences. Ask one question at a time.
                 - Spell any identifier (ref number, load ID) digit by digit.
                   Example: "LT-001" → "L T — zero zero one". "29472" → "two nine four seven two" (NEVER "twenty-nine thousand").
+                  The hyphen is a brief pause, not a spoken word — never say "dash" or "hyphen" out loud.
                 - Spell out dollar amounts in full words (e.g. "twelve hundred dollars").
                 - Avoid acronyms unless the caller used them first.
 
@@ -216,6 +217,7 @@ class CarrierCheckAgent(Agent):
                 - One question at a time. Maximum two sentences per turn.
                 - Spell any identifier (ref number, load ID) digit by digit.
                   Example: "REF-29472" → "R E F — two nine four seven two" (NEVER "twenty-nine thousand").
+                  The hyphen is a brief pause, not a spoken word — never say "dash" or "hyphen" out loud.
                 - Say times naturally (e.g. "two-thirty P M Central").
 
                 # Pauses and filler words
@@ -384,6 +386,7 @@ class ARCollectionsAgent(Agent):
                 - One to two sentences per turn. Ask one question at a time.
                 - Spell any identifier (invoice number, reference) digit by digit.
                   Example: "INV-4821" → "I N V — four eight two one" (NEVER "four thousand eight hundred").
+                  The hyphen is a brief pause, not a spoken word — never say "dash" or "hyphen" out loud.
                 - Spell out dollar amounts in full words (e.g. "twelve thousand four hundred dollars").
                 - Spell out dates fully (e.g. "June twenty-fifth, twenty twenty-six").
 
@@ -971,7 +974,7 @@ class RateNegotiationAgent(Agent):
             await consult_room.connect(LIVEKIT_URL, token)
 
             consult_session = AgentSession(
-                llm=openai_plugin.LLM(model="gpt-4o-mini"),
+                llm=openai_plugin.LLM(model="gpt-4o"),
                 stt=deepgram.STT(model="nova-3-general", language="en"),
                 tts=cartesia.TTS(
                     model="sonic-3",
@@ -1196,6 +1199,7 @@ class FleetQueryAgent(Agent):
                   offer to go deeper only if they ask for it.
                 - Spell any identifier (ref number, invoice number) digit by digit.
                   Example: "REF-29472" → "R E F — two nine four seven two."
+                  The hyphen is a brief pause, not a spoken word — never say "dash" or "hyphen" out loud.
                 - Speak dollar amounts in full words: "twelve hundred dollars."
                 - No markdown, bullet points, or symbols — this may be read aloud.
 
@@ -1457,7 +1461,7 @@ async def my_agent(ctx: JobContext):
 
     is_rate_negotiation = use_case == "rate_negotiation"
     session = AgentSession(
-        llm=openai_plugin.LLM(model="gpt-4o" if is_rate_negotiation else "gpt-4o-mini"),
+        llm=openai_plugin.LLM(model="gpt-4o"),
         stt=deepgram.STT(model="nova-3-general", language="en"),
         tts=cartesia.TTS(
             model="sonic-3",
