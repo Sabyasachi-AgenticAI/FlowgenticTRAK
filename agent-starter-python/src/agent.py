@@ -37,7 +37,7 @@ LIVEKIT_URL = os.getenv("LIVEKIT_URL", "")
 
 VOICE_ARIA = "9626c31c-bec5-4cca-baa8-f8ba9e84c8bc"  # Jacqueline - confident young American female
 VOICE_MARCUS = "5fc5c797-12c5-4f2b-ac9b-d4e53c08098f"  # Wyatt - Dependable Dispatcher, friendly American male w/ subtle Southern drawl
-MARCUS_TTS_SPEED = "fast"
+MARCUS_TTS_SPEED = 1.15  # sonic-3 requires a float (0.6-2.0), not the "fast"/"slow" string literals
 MARCUS_TTS_EMOTION = ["Confident"]
 
 
