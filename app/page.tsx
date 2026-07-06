@@ -1,6 +1,5 @@
 'use client'
 import { useEffect } from 'react'
-import Script from 'next/script'
 import { createClient } from '@supabase/supabase-js'
 
 // ── Config ────────────────────────────────────────────────────
@@ -1500,14 +1499,18 @@ export default function Page() {
       {/* Fleet manager voice + text query widget — dispatches FleetQueryAgent via
           data-lk-job-metadata (see agent.py _resolve_dispatch). Requires the widget to be
           enabled for EMBED_AGENT_ID in the LiveKit Cloud dashboard with this origin allowed
-          and text chat capability turned on. */}
-      <Script
+          and text chat capability turned on.
+          Rendered as a plain <script> tag (not next/script) because the widget bundle must
+          load as a classic script tag — next/script's afterInteractive/lazyOnload strategies
+          inject it via document.createElement after hydration, which LiveKit's loader does
+          not support. React 19 hoists a real <script> element here into a genuine part of
+          the rendered HTML. */}
+      <script
         src="https://cloud.livekit.io/embed-popup.js"
         data-lk-agent={EMBED_AGENT_ID}
         data-lk-job-metadata='{"use_case":"fleet_query"}'
         data-lk-color="#F59E0B"
         data-lk-theme="system"
-        strategy="afterInteractive"
       />
     </>
   )
