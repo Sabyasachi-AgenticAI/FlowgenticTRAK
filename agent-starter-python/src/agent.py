@@ -547,9 +547,11 @@ class ARCollectionsAgent(Agent):
         short shipment, or similar. Only use this when the dispute puts the amount
         owed itself in question. For any other refusal, inability to commit, wrong
         contact, or generic dispute with no amount-affecting discrepancy, call
-        escalate_account instead. Say NOTHING before calling this tool — it announces
-        the hold for you. On success the supervisor is connected live with the
-        customer and this call ends automatically — do NOT speak again afterward.
+        escalate_account instead. Say NOTHING before calling this tool — it speaks
+        its own empathetic acknowledgment and hold announcement for you, so your own
+        turn should end the moment you decide to transfer. On success the supervisor
+        is connected live with the customer and this call ends automatically — do NOT
+        speak again afterward.
 
         Args:
             invoice_no: The invoice number
@@ -560,18 +562,23 @@ class ARCollectionsAgent(Agent):
             call_summary: One-sentence recap for the AR dashboard (REQUIRED)
         """
         hold_msg = context.session.say(
-            "Let me get my supervisor on the line for this one — hold on for me for "
-            "just a moment.",
+            'Oh no, <break time="300ms"/> I\'m really sorry to hear that — that\'s '
+            'not what we want happening at all. <break time="250ms"/> Let me, um '
+            '<break time="200ms"/> get my supervisor on the line so we can sort '
+            'this out properly for you. One moment.',
             allow_interruptions=False,
         )
         await hold_msg.wait_for_playout()
 
+        # Not "completed" — the dispute is only handed off here, not resolved, so
+        # the AR auto-dialer shouldn't treat this account as done and move on to
+        # the next one while a human is still actively working the call.
         await _supa_patch(
             "ar_accounts",
             {"invoice_no": invoice_no},
             {
-                "status": "dispute_escalated",
-                "call_status": "completed",
+                "status": "dispute_in_review",
+                "call_status": "transferred",
                 "notes": dispute_summary,
                 "call_summary": call_summary,
             },
@@ -591,15 +598,27 @@ class ARCollectionsAgent(Agent):
             )
         except ToolError as e:
             logger.info("Damage dispute transfer failed for invoice %s: %s", invoice_no, e)
-            return (
-                "Could not reach a supervisor right now — tell the customer we've "
-                "logged the dispute and someone will follow up, then end the call "
-                "normally."
+            await _supa_patch(
+                "ar_accounts",
+                {"invoice_no": invoice_no},
+                {"status": "escalated", "call_status": "completed"},
             )
+            farewell = context.session.say(
+                'Okay, <break time="200ms"/> I wasn\'t able to reach my supervisor '
+                'just now, but um <break time="200ms"/> I\'ve logged everything and '
+                'someone will follow up with you directly. '
+                '<break time="300ms"/> Sorry again for the trouble. '
+                '<break time="400ms"/> Goodbye!',
+                allow_interruptions=False,
+            )
+            await farewell.wait_for_playout()
+            await asyncio.sleep(0.5)
+            await self._hangup()
+            return
 
         farewell = context.session.say(
-            "Alright — I've got our AR supervisor with us now; they'll take it from "
-            "here. Thanks for your patience.",
+            'Alright, <break time="200ms"/> I\'ve got our AR supervisor with us now — '
+            'they\'ll take it from here. <break time="200ms"/> Thanks for your patience.',
             allow_interruptions=False,
         )
         await farewell.wait_for_playout()
