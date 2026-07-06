@@ -19,11 +19,13 @@ from livekit.agents import (
     JobContext,
     JobProcess,
     RunContext,
+    ToolError,
     cli,
     function_tool,
     get_job_context,
     room_io,
 )
+from livekit.agents.beta.workflows import WarmTransferTask
 from livekit.plugins import ai_coustics, cartesia, deepgram, silero
 from livekit.plugins import openai as openai_plugin
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
@@ -432,13 +434,18 @@ class ARCollectionsAgent(Agent):
                    I'm reaching out about invoice {invoice_no} for {amount_str} — it's {days_overdue} days past due."
                 3. Ask: "Are you aware of this balance, and do you know when we might expect payment?"
                 4. If committing to a date: confirm clearly, then call log_promise_to_pay.
-                5. If disputing or unable to commit: call escalate_account.
-                6. Do NOT say goodbye — it plays automatically after the tool succeeds. Stay silent.
+                5. If they dispute the AMOUNT because of a discrepancy — goods arrived damaged,
+                   wrong item, short shipment, or similar — call escalate_damage_dispute. This
+                   puts a supervisor live on the call to work it out directly with the customer.
+                6. For any other refusal, inability to commit, wrong contact, or generic dispute
+                   with no amount-affecting discrepancy: call escalate_account, exactly as before.
+                7. Do NOT say goodbye — it plays automatically after the tool succeeds. Stay silent.
 
                 # Guardrails
                 - One question at a time.
                 - If no answer after a reasonable wait, call escalate_account anyway.
-                - Do not speak after calling log_promise_to_pay or escalate_account.
+                - Do not speak after calling log_promise_to_pay, escalate_account, or
+                  escalate_damage_dispute — each one handles its own call ending.
             """),
         )
 
@@ -525,6 +532,78 @@ class ARCollectionsAgent(Agent):
         await farewell.wait_for_playout()
         await asyncio.sleep(0.5)
         await self._hangup()
+
+    @function_tool
+    async def escalate_damage_dispute(
+        self,
+        context: RunContext,
+        invoice_no: str,
+        amount_due: float,
+        dispute_summary: str,
+        call_summary: str,
+    ) -> str:
+        """Warm-transfer the call to a live supervisor when the customer disputes the
+        invoiced AMOUNT because of a discrepancy — goods arrived damaged, wrong item,
+        short shipment, or similar. Only use this when the dispute puts the amount
+        owed itself in question. For any other refusal, inability to commit, wrong
+        contact, or generic dispute with no amount-affecting discrepancy, call
+        escalate_account instead. Say NOTHING before calling this tool — it announces
+        the hold for you. On success the supervisor is connected live with the
+        customer and this call ends automatically — do NOT speak again afterward.
+
+        Args:
+            invoice_no: The invoice number
+            amount_due: The invoiced amount currently in dispute
+            dispute_summary: One-sentence description of the discrepancy, in the
+                customer's own words (e.g. 'shipment arrived with visible water
+                damage, customer disputes the full amount')
+            call_summary: One-sentence recap for the AR dashboard (REQUIRED)
+        """
+        hold_msg = context.session.say(
+            "Let me get my supervisor on the line for this one — hold on for me for "
+            "just a moment.",
+            allow_interruptions=False,
+        )
+        await hold_msg.wait_for_playout()
+
+        await _supa_patch(
+            "ar_accounts",
+            {"invoice_no": invoice_no},
+            {
+                "status": "dispute_escalated",
+                "call_status": "completed",
+                "notes": dispute_summary,
+                "call_summary": call_summary,
+            },
+        )
+
+        try:
+            await WarmTransferTask(
+                sip_call_to=os.getenv("BOSS_PHONE", ""),
+                sip_trunk_id=os.getenv("SIP_OUTBOUND_TRUNK_ID", ""),
+                chat_ctx=self.chat_ctx,
+                extra_instructions=(
+                    f"This is a billing dispute — invoice {invoice_no}, {self.customer}, "
+                    f"${amount_due:,.0f} due. Discrepancy reported by the customer: "
+                    f"{dispute_summary}. Brief the supervisor on this, then connect "
+                    f"them to the customer once ready."
+                ),
+            )
+        except ToolError as e:
+            logger.info("Damage dispute transfer failed for invoice %s: %s", invoice_no, e)
+            return (
+                "Could not reach a supervisor right now — tell the customer we've "
+                "logged the dispute and someone will follow up, then end the call "
+                "normally."
+            )
+
+        farewell = context.session.say(
+            "Alright — I've got our AR supervisor with us now; they'll take it from "
+            "here. Thanks for your patience.",
+            allow_interruptions=False,
+        )
+        await farewell.wait_for_playout()
+        await context.session.aclose()
 
     @function_tool
     async def get_overdue_accounts(self, context: RunContext) -> str:
