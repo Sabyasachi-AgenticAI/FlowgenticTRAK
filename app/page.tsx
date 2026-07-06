@@ -1120,15 +1120,27 @@ export default function Page() {
       <header className="topbar">
         <a className="topbar-logo" href="#">
           <div className="logo-mark">
-            <svg width="15" height="15" viewBox="0 0 28 28" fill="none">
-              <path d="M16.2 2.5 6.4 15.1c-.5.64-.04 1.57.77 1.57h4.06l-1.6 8.06c-.18.9.97 1.43 1.53.7L21.6 12.4c.5-.65.04-1.58-.77-1.58h-4.2l1.65-7.55c.2-.9-.94-1.46-1.5-.77Z" fill="#fff"/>
+            {/* A globe, tracked: the wireframe is the whole network TRAK watches,
+                the pin is one load/carrier on it, the ping is the live AI voice
+                channel watching that pin. */}
+            <svg width="26" height="26" viewBox="0 0 28 28" fill="none">
+              <circle cx="14" cy="14" r="11.5" stroke="#fff" strokeOpacity="0.4" strokeWidth="1"/>
+              <ellipse cx="14" cy="14" rx="11.5" ry="4.2" stroke="#fff" strokeOpacity="0.4" strokeWidth="1"/>
+              <ellipse cx="14" cy="14" rx="4.6" ry="11.5" stroke="#fff" strokeOpacity="0.4" strokeWidth="1"/>
+              <line x1="2.5" y1="14" x2="25.5" y2="14" stroke="#fff" strokeOpacity="0.4" strokeWidth="1"/>
+              <g transform="translate(14,14) scale(0.6) translate(-14,-13.5)">
+                <path d="M14 3.2c-4.03 0-7.1 3.16-7.1 7.06 0 5.37 6.2 13.6 6.83 14.42.14.18.4.18.54 0 .63-.82 6.83-9.05 6.83-14.42 0-3.9-3.07-7.06-7.1-7.06z" fill="#fff"/>
+                <circle cx="14" cy="10.2" r="3.05" fill="var(--amber-400)"/>
+              </g>
+              <circle cx="21" cy="6.5" r="2.3" fill="var(--blue-500)"/>
+              <circle cx="21" cy="6.5" r="4.1" stroke="var(--blue-500)" strokeOpacity="0.5" strokeWidth="1"/>
             </svg>
           </div>
-          <span className="logo-text">TRAK</span>
-          <span className="logo-sub">&nbsp;by Flowgentic</span>
+          <div className="logo-word">
+            <span className="logo-text">TRAK</span>
+            <span className="logo-sub">by Flowgentic</span>
+          </div>
         </a>
-        <div className="topbar-divider"></div>
-        <span className="topbar-client">CSA Demo</span>
         <div className="topbar-spacer"></div>
         <div id="statusPill" className="status-pill connecting">
           <span className="status-dot"></span>
@@ -1509,7 +1521,7 @@ export default function Page() {
         src="https://cloud.livekit.io/embed-popup.js"
         data-lk-agent={EMBED_AGENT_ID}
         data-lk-job-metadata='{"use_case":"fleet_query"}'
-        data-lk-color="#F59E0B"
+        data-lk-color="#DD7E0A"
         data-lk-theme="system"
       />
     </>
