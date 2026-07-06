@@ -562,8 +562,8 @@ class ARCollectionsAgent(Agent):
             call_summary: One-sentence recap for the AR dashboard (REQUIRED)
         """
         hold_msg = context.session.say(
-            'Oh no, <break time="300ms"/> I\'m really sorry to hear that — that\'s '
-            'not what we want happening at all. <break time="250ms"/> Let me, um '
+            'I\'m so sorry to hear that, <break time="300ms"/> that\'s definitely '
+            'not what we want happening. <break time="250ms"/> Let me, um '
             '<break time="200ms"/> get my supervisor on the line so we can sort '
             'this out properly for you. One moment.',
             allow_interruptions=False,
@@ -592,8 +592,14 @@ class ARCollectionsAgent(Agent):
                 extra_instructions=(
                     f"This is a billing dispute — invoice {invoice_no}, {self.customer}, "
                     f"${amount_due:,.0f} due. Discrepancy reported by the customer: "
-                    f"{dispute_summary}. Brief the supervisor on this, then connect "
-                    f"them to the customer once ready."
+                    f"{dispute_summary}. Brief the supervisor on this in one or two "
+                    f"sentences, then ask if they're ready to speak with the customer "
+                    f"directly. As soon as they say anything affirmative at all — "
+                    f"'yes', 'sure', 'go ahead', 'connect me', 'ready', or similar — "
+                    f"call connect_to_caller immediately. Do not ask a second "
+                    f"confirming question first. Only call decline_transfer if the "
+                    f"supervisor explicitly says they cannot or will not take this "
+                    f"call right now."
                 ),
             )
         except ToolError as e:
