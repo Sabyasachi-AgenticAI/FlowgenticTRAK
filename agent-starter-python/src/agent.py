@@ -1407,15 +1407,21 @@ class FleetQueryAgent(Agent):
             ref: Load reference number (e.g. 'REF-29472'). Leave blank for a general summary.
         """
         rows = await _supa_get("carrier_check_loads", {"ref": ref} if ref else None)
+        alert_labels = {
+            "driver_initiated_vehicle_breakdown": "a driver-initiated vehicle breakdown alert",
+            "gps_idle": "a GPS idle alert (no movement logged)",
+        }
         if ref:
             if not rows:
                 return f"No carrier check-in found for {ref}."
             r = rows[0]
+            alert_type = r.get("alert_type")
+            alert_note = f" There's {alert_labels[alert_type]} on this load." if alert_type in alert_labels else ""
             return (
                 f"Load {r.get('ref')} with {r.get('carrier', 'an unknown carrier')}: "
                 f"call status {r.get('call_status', 'unknown')}, last known location "
                 f"{r.get('last_location') or 'not yet reported'}, "
-                f"ETA {r.get('last_eta') or 'not yet reported'}. "
+                f"ETA {r.get('last_eta') or 'not yet reported'}." + alert_note + " "
                 + (r.get("call_summary") or "")
             )
         if not rows:
@@ -1423,9 +1429,17 @@ class FleetQueryAgent(Agent):
         in_progress = [r for r in rows if r.get("call_status") == "in_progress"]
         completed = [r for r in rows if r.get("call_status") == "completed"]
         issues = [r for r in rows if r.get("status") == "issue_raised"]
+        breakdowns = [r for r in rows if r.get("alert_type") == "driver_initiated_vehicle_breakdown"]
+        breakdown_note = (
+            " " + "; ".join(f"{r.get('ref')} ({r.get('carrier', 'unknown carrier')})" for r in breakdowns)
+            + " reported a vehicle breakdown."
+            if breakdowns
+            else ""
+        )
         return (
             f"{len(rows)} carrier check-in loads — {len(in_progress)} in progress, "
             f"{len(completed)} completed, {len(issues)} flagged with issues."
+            + breakdown_note
         )
 
     @function_tool
