@@ -76,10 +76,10 @@
 
 /* ── Container ──────────────────────────────────── */
 .ld-wrap {
-  max-width: 1120px;
+  max-width: 1280px;
   margin: 0 auto;
-  padding-left: 24px;
-  padding-right: 24px;
+  padding-left: clamp(24px, 3vw, 40px);
+  padding-right: clamp(24px, 3vw, 40px);
 }
 
 /* ── Topbar ─────────────────────────────────────── */
