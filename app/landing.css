@@ -55,7 +55,7 @@
   z-index: -1;
   pointer-events: none;
   background-image: radial-gradient(circle, #CFD9E4 1.6px, transparent 1.6px);
-  background-size: 26px 26px;
+  background-size: 36px 36px;
   -webkit-mask-image: linear-gradient(
     to bottom,
     #000 0,
@@ -170,10 +170,13 @@
 
 /* ── Type ───────────────────────────────────────── */
 .ld-eyebrow {
-  font-size: 13px;
-  font-weight: 700;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
   color: var(--lp-accent-ink);
-  margin-bottom: 10px;
+  margin-bottom: 12px;
 }
 .ld-h1 {
   font-size: clamp(38px, 4.6vw, 56px);
@@ -188,12 +191,12 @@
   color: var(--lp-accent);
 }
 .ld-h2 {
-  font-size: clamp(26px, 3vw, 34px);
+  font-size: clamp(28px, 3.2vw, 38px);
   font-weight: 800;
   line-height: 1.15;
   letter-spacing: -0.015em;
   color: var(--lp-ink);
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 .ld-lead {
   font-size: 16px;
@@ -650,8 +653,11 @@
   box-shadow: 0 12px 32px -16px rgba(15, 31, 51, 0.18);
 }
 .si-kicker {
+  font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
   color: var(--lp-muted);
   margin-bottom: 6px;
 }
