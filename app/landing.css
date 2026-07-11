@@ -35,6 +35,12 @@
   color: var(--lp-ink);
 }
 
+/* The dashboard's globals.css paints the document canvas warm cream; when
+   scroll rasterization lags, that cream flashes through mid-tile. Keep the
+   canvas white (or gray for sign-in) whenever a landing page is mounted. */
+html:has(.ld-page), body:has(.ld-page) { background: #fff; }
+html:has(.si-page), body:has(.si-page) { background: #F5F7FA; }
+
 .ld-page {
   width: 100%;
   min-height: 100%;
@@ -54,6 +60,7 @@
   height: 2400px;
   z-index: -1;
   pointer-events: none;
+  transform: translateZ(0);
   background-image: radial-gradient(circle, #CFD9E4 1.6px, transparent 1.6px);
   background-size: 36px 36px;
   -webkit-mask-image: linear-gradient(
@@ -412,7 +419,10 @@
   position: relative;
   padding-top: 40px;
   min-width: 0;
+  opacity: 0.55;
+  transition: opacity 0.45s ease;
 }
+.ld-step.active { opacity: 1; }
 /* Dashed route leg connecting each step to the next. */
 .ld-step::before {
   content: '';
@@ -438,6 +448,13 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: background 0.3s ease, border-color 0.3s ease, color 0.3s ease, box-shadow 0.3s ease;
+}
+.ld-step.active .ld-step-num {
+  background: var(--lp-accent);
+  border-color: var(--lp-accent);
+  color: #fff;
+  box-shadow: 0 0 0 4px var(--lp-accent-soft);
 }
 .ld-step h3 {
   font-size: 17px;
@@ -755,4 +772,5 @@
   .ld-live-dot { animation: none; }
   .ld-btn { transition: none; }
   .ld-lane-fill, .ld-lane-dot { transition: none; }
+  .ld-step { opacity: 1; transition: none; }
 }

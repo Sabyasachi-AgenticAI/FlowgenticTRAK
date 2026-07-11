@@ -134,6 +134,7 @@ const USE_CASES = [
 
 export default function Landing() {
   const [mode, setMode] = useState(0)
+  const [step, setStep] = useState(0)
   const paused = useRef(false)
 
   useEffect(() => {
@@ -141,7 +142,10 @@ export default function Landing() {
     const t = setInterval(() => {
       if (!paused.current && !document.hidden) setMode((m) => (m + 1) % MODES.length)
     }, 6000)
-    return () => clearInterval(t)
+    const s = setInterval(() => {
+      if (!document.hidden) setStep((x) => (x + 1) % STEPS.length)
+    }, 3000)
+    return () => { clearInterval(t); clearInterval(s) }
   }, [])
 
   const m = MODES[mode]
@@ -243,7 +247,7 @@ export default function Landing() {
           </p>
           <div className="ld-how-track">
             {STEPS.map((s, i) => (
-              <div className="ld-step" key={s.title}>
+              <div className={'ld-step' + (i === step ? ' active' : '')} key={s.title}>
                 <span className="ld-step-num">{i + 1}</span>
                 <h3>{s.title}</h3>
                 <p>{s.body}</p>
