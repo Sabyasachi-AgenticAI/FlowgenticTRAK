@@ -1,5 +1,6 @@
 'use client'
 import { useEffect } from 'react'
+import { UserButton } from '@clerk/nextjs'
 import { createClient } from '@supabase/supabase-js'
 
 // ── Config ────────────────────────────────────────────────────
@@ -1167,6 +1168,9 @@ export default function Page() {
         </button>
         <div className="audio-bars">
           {[0,1,2,3].map(i=><div key={i} className="audio-bar" style={{animationDelay:`${i*0.1}s`}}></div>)}
+        </div>
+        <div style={{marginLeft:12,display:'flex',alignItems:'center'}}>
+          <UserButton />
         </div>
       </header>
 

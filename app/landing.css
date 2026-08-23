@@ -648,7 +648,7 @@ html:has(.si-page), body:has(.si-page) { background: #F5F7FA; }
   color: var(--lp-muted);
 }
 
-/* ── Sign-in page ───────────────────────────────── */
+/* ── Sign-in / sign-up pages (Clerk renders the card) ── */
 .si-page {
   width: 100%;
   min-height: 100vh;
@@ -659,77 +659,6 @@ html:has(.si-page), body:has(.si-page) { background: #F5F7FA; }
   gap: 26px;
   padding: 40px 24px;
   background: var(--lp-bg-alt);
-}
-.si-ticket {
-  width: 100%;
-  max-width: 400px;
-  background: #fff;
-  border: 1px solid var(--lp-border);
-  border-radius: 12px;
-  padding: 32px 32px 28px;
-  box-shadow: 0 12px 32px -16px rgba(15, 31, 51, 0.18);
-}
-.si-kicker {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.09em;
-  color: var(--lp-muted);
-  margin-bottom: 6px;
-}
-.si-title {
-  font-size: 22px;
-  font-weight: 800;
-  letter-spacing: -0.01em;
-  color: var(--lp-ink);
-  margin-bottom: 24px;
-}
-.si-field { margin-bottom: 16px; }
-.si-label {
-  display: block;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--lp-ink-2);
-  margin-bottom: 6px;
-}
-.si-input {
-  width: 100%;
-  font-family: var(--font-sans);
-  font-size: 14px;
-  color: var(--lp-ink);
-  background: #fff;
-  border: 1px solid #CBD5E1;
-  border-radius: 8px;
-  padding: 10px 12px;
-}
-.si-input::placeholder { color: #A2AFBE; }
-.si-input:focus {
-  border-color: var(--lp-accent);
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(232, 89, 12, 0.15);
-}
-.si-error {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--lp-warn);
-  background: var(--lp-warn-bg);
-  border: 1px solid var(--lp-warn-border);
-  border-radius: 8px;
-  padding: 9px 12px;
-  margin-bottom: 16px;
-}
-.si-submit {
-  width: 100%;
-  margin: 4px 0 18px;
-}
-.si-submit:disabled { opacity: 0.6; cursor: wait; }
-.si-note {
-  padding-top: 14px;
-  border-top: 1px solid var(--lp-border);
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--lp-muted);
 }
 .si-back {
   font-size: 12px;

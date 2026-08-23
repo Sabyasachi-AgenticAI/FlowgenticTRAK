@@ -8,6 +8,7 @@
     "start": "next start"
   },
   "dependencies": {
+    "@clerk/nextjs": "^7.8.0",
     "@supabase/supabase-js": "^2.49.0",
     "livekit-client": "^2.0.0",
     "next": "^15.3.3",

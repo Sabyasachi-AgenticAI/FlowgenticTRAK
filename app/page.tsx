@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
+import { Show, UserButton } from '@clerk/nextjs'
 import { TrakMark } from './trak-mark'
 import './landing.css'
 
@@ -166,8 +167,14 @@ export default function Landing() {
             <a href="#aria">Agents</a>
             <a href="#integration">Integration</a>
           </nav>
-          <Link href="/signin" className="ld-nav-signin">Sign in</Link>
-          <a href={DEMO_URL} className="ld-btn ld-btn-topbar">Book a demo</a>
+          <Show when="signed-out">
+            <Link href="/signin" className="ld-nav-signin">Sign in</Link>
+            <a href={DEMO_URL} className="ld-btn ld-btn-topbar">Book a demo</a>
+          </Show>
+          <Show when="signed-in">
+            <Link href="/dashboard" className="ld-btn ld-btn-topbar">Open dashboard</Link>
+            <UserButton />
+          </Show>
         </div>
       </header>
 
@@ -187,7 +194,12 @@ export default function Landing() {
             </p>
             <div className="ld-cta-row">
               <a href={DEMO_URL} className="ld-btn">Book a demo</a>
-              <Link href="/signin" className="ld-btn ld-btn-ghost">Sign in to TRAK</Link>
+              <Show when="signed-out">
+                <Link href="/signin" className="ld-btn ld-btn-ghost">Sign in to TRAK</Link>
+              </Show>
+              <Show when="signed-in">
+                <Link href="/dashboard" className="ld-btn ld-btn-ghost">Open dashboard</Link>
+              </Show>
             </div>
           </div>
 
